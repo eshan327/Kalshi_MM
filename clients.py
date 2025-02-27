@@ -24,7 +24,7 @@ class KalshiBaseClient:
         self,
         key_id: str,
         private_key: rsa.RSAPrivateKey,
-        environment: Environment = Environment.DEMO,
+        environment: Environment = Environment.PROD,
     ):
         """Initializes the client with the provided API key and private key.
 
@@ -88,7 +88,7 @@ class KalshiHttpClient(KalshiBaseClient):
         self,
         key_id: str,
         private_key: rsa.RSAPrivateKey,
-        environment: Environment = Environment.DEMO,
+        environment: Environment = Environment.PROD,
     ):
         super().__init__(key_id, private_key, environment)
         self.host = self.HTTP_BASE_URL
@@ -178,7 +178,7 @@ class KalshiWebSocketClient(KalshiBaseClient):
         self,
         key_id: str,
         private_key: rsa.RSAPrivateKey,
-        environment: Environment = Environment.DEMO,
+        environment: Environment = Environment.PROD,
     ):
         super().__init__(key_id, private_key, environment)
         self.ws = None

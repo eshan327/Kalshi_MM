@@ -7,7 +7,7 @@ from clients import KalshiHttpClient, KalshiWebSocketClient, Environment
 
 # Load environment variables
 load_dotenv()
-env = Environment.DEMO # Toggle environment
+env = Environment.PROD # Toggle environment
 KEYID = os.getenv('DEMO_KEYID') if env == Environment.DEMO else os.getenv('PROD_KEYID')
 KEYFILE = os.getenv('DEMO_KEYFILE') if env == Environment.DEMO else os.getenv('PROD_KEYFILE')
 
