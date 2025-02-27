@@ -52,7 +52,7 @@ class KalshiBaseClient:
         current_time_milliseconds = int(time.time() * 1000)
         timestamp_str = str(current_time_milliseconds)
 
-        # Remove query params from path
+        # Remove query parameters from path
         path_parts = path.split('?')
 
         msg_string = timestamp_str + method + path_parts[0]
