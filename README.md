@@ -1,7 +1,7 @@
 ## Installation 
 install requirements.txt in a virtual environment & run main.py
 
-Example outuput:
+Example output:
 ```
 Balance: 1000.00
 WebSocket connection opened.
