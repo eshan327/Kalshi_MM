@@ -2,17 +2,17 @@ import requests
 import base64
 import time
 from typing import Any, Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import json
 
+import pytz
+import websockets
 from requests.exceptions import HTTPError
 
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.exceptions import InvalidSignature
-
-import websockets
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 class Environment(Enum):
     DEMO = "demo"
@@ -95,6 +95,7 @@ class KalshiHttpClient(KalshiBaseClient):
         self.exchange_url = "/trade-api/v2/exchange"
         self.markets_url = "/trade-api/v2/markets"
         self.portfolio_url = "/trade-api/v2/portfolio"
+        self.orders_url = "/trade-api/v2/orders"
 
     def rate_limit(self) -> None:
         """Built-in rate limiter to prevent exceeding API rate limits."""
@@ -172,6 +173,28 @@ class KalshiHttpClient(KalshiBaseClient):
         params = {k: v for k, v in params.items() if v is not None}
         return self.get(self.markets_url + '/trades', params=params)
 
+    def get_all_markets(self) -> Dict[str, Any]:
+        """Retrieves all markets."""
+        return self.get(self.markets_url)
+
+    def place_order(self, market_id: str, side: str, price: int, size: int) -> Dict[str, Any]:
+        """Places an order in the specified market."""
+        order = {
+            "market_id": market_id,
+            "side": side,
+            "price": price,
+            "size": size
+        }
+        return self.post(self.orders_url, order)
+
+    def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        """Cancels an existing order."""
+        return self.delete(f"{self.orders_url}/{order_id}")
+
+    def get_orders(self) -> Dict[str, Any]:
+        """Retrieves all open orders."""
+        return self.get(self.orders_url)
+
 class KalshiWebSocketClient(KalshiBaseClient):
     """Client for handling WebSocket connections to the Kalshi API."""
     def __init__(
@@ -183,7 +206,8 @@ class KalshiWebSocketClient(KalshiBaseClient):
         super().__init__(key_id, private_key, environment)
         self.ws = None
         self.url_suffix = "/trade-api/ws/v2"
-        self.message_id = 1  # Add counter for message IDs
+        self.message_id = 1  # Counter for message IDs
+        self.market_descriptions = {}
 
     async def connect(self):
         """Establishes a WebSocket connection using authentication."""
@@ -197,15 +221,16 @@ class KalshiWebSocketClient(KalshiBaseClient):
     async def on_open(self):
         """Callback when WebSocket connection is opened."""
         print("WebSocket connection opened.")
-        await self.subscribe_to_tickers()
+        await self.subscribe_to_climate_tickers()
 
-    async def subscribe_to_tickers(self):
-        """Subscribe to ticker updates for all markets."""
+    async def subscribe_to_climate_tickers(self):
+        """Subscribe to ticker updates for climate-related markets."""
         subscription_message = {
             "id": self.message_id,
             "cmd": "subscribe",
             "params": {
-                "channels": ["ticker"]
+                "channels": ["ticker"],
+                "market_ids": list(self.market_descriptions.keys())
             }
         }
         await self.ws.send(json.dumps(subscription_message))
@@ -223,7 +248,55 @@ class KalshiWebSocketClient(KalshiBaseClient):
 
     async def on_message(self, message):
         """Callback for handling incoming messages."""
-        print("Received message:", message)
+        parsed_message = json.loads(message)
+        market_id = parsed_message.get('msg', {}).get('market_id')
+        description = self.market_descriptions.get(market_id, "Unknown market")
+        
+        # Convert POSIX time to something that's actually readable
+        posix_time = parsed_message.get('msg', {}).get('ts')
+        if posix_time:
+            utc = datetime.fromtimestamp(posix_time, timezone.utc)
+            est = utc.astimezone(pytz.timezone('US/Eastern'))
+            readable_time = est.strftime('%m-%d-%Y %I:%M:%S %p')
+            parsed_message['msg']['ts'] = readable_time
+        
+        # Formatting
+        market_ticker = parsed_message.get('msg', {}).get('market_ticker')
+        if market_ticker:
+            parts = market_ticker.split('-')
+            if len(parts) >= 3:
+                formatted_ticker = f"{parts[0]} ({parts[1]}) {parts[2]}"
+                if len(parts) > 3:
+                    formatted_ticker += f" {parts[3]}"
+                parsed_message['msg']['market_ticker'] = formatted_ticker
+        
+        price = parsed_message.get('msg', {}).get('price')
+        if price is not None:
+            parsed_message['msg']['price'] = f"${price:.2f}"
+        
+        volume = parsed_message.get('msg', {}).get('volume')
+        if volume is not None:
+            parsed_message['msg']['volume'] = f"{volume:,}"
+        
+        dollar_volume = parsed_message.get('msg', {}).get('dollar_volume')
+        if dollar_volume is not None:
+            parsed_message['msg']['dollar_volume'] = f"${dollar_volume:,}"
+        
+        dollar_open_interest = parsed_message.get('msg', {}).get('dollar_open_interest')
+        if dollar_open_interest is not None:
+            parsed_message['msg']['dollar_open_interest'] = f"${dollar_open_interest:,}"
+        
+        yes_bid = parsed_message.get('msg', {}).get('yes_bid')
+        if yes_bid is not None:
+            parsed_message['msg']['yes_bid'] = f"{yes_bid}¢"
+        
+        yes_ask = parsed_message.get('msg', {}).get('yes_ask')
+        if yes_ask is not None:
+            parsed_message['msg']['yes_ask'] = f"{yes_ask}¢"
+        
+        formatted_message = json.dumps(parsed_message, indent=4, ensure_ascii=False)
+        print("Received message:\n", formatted_message)
+        print(f"Market description: {description}")
 
     async def on_error(self, error):
         """Callback for handling errors."""

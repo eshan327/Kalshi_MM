@@ -1,9 +1,10 @@
 import os
+import asyncio
 from dotenv import load_dotenv
 from cryptography.hazmat.primitives import serialization
-import asyncio
 
 from clients import KalshiHttpClient, KalshiWebSocketClient, Environment
+from market_maker import market_making  # Import the market making function
 
 # Load environment variables
 load_dotenv()
@@ -33,6 +34,17 @@ client = KalshiHttpClient(
 balance = client.get_balance()
 print("Balance:", balance)
 
+# Fetch all markets
+markets = client.get_all_markets()
+# print("First market:", markets['markets'][0])
+
+# Filter for the specific climate-related market
+climate_markets = [market for market in markets['markets'] if 'climate' in market.get('category', '').lower()]
+# print("Filtered climate markets:", climate_markets)
+
+market_descriptions = {market['id']: market['title'] for market in climate_markets}
+# print("Market descriptions:", market_descriptions)
+
 # Initialize the WebSocket client
 ws_client = KalshiWebSocketClient(
     key_id = KEYID,
@@ -40,5 +52,8 @@ ws_client = KalshiWebSocketClient(
     environment = env
 )
 
+ws_client.market_descriptions = market_descriptions
+
 # Establish WebSocket connection
 asyncio.run(ws_client.connect())
+asyncio.run(market_making(client, climate_markets))
