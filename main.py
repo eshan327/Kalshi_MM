@@ -54,6 +54,12 @@ ws_client = KalshiWebSocketClient(
 
 ws_client.market_descriptions = market_descriptions
 
-# Establish WebSocket connection
-asyncio.run(ws_client.connect())
-asyncio.run(market_making(client, climate_markets))
+async def main():
+    # Run WebSocket connection and market making concurrently
+    await asyncio.gather(
+        ws_client.connect(),
+        market_making(client, climate_markets)
+    )
+
+# Run the main function
+asyncio.run(main())
