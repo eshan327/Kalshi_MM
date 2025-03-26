@@ -36,14 +36,6 @@ print("Balance:", balance)
 
 # Fetch all markets
 markets = client.get_all_markets()
-# print("First market:", markets['markets'][0])
-
-# Filter for the specific climate-related market
-climate_markets = [market for market in markets['markets'] if 'climate' in market.get('category', '').lower()]
-# print("Filtered climate markets:", climate_markets)
-
-market_descriptions = {market['id']: market['title'] for market in climate_markets}
-# print("Market descriptions:", market_descriptions)
 
 # Initialize the WebSocket client
 ws_client = KalshiWebSocketClient(
@@ -52,13 +44,10 @@ ws_client = KalshiWebSocketClient(
     environment = env
 )
 
-ws_client.market_descriptions = market_descriptions
-
 async def main():
     # Run WebSocket connection and market making concurrently
     await asyncio.gather(
         ws_client.connect(),
-        market_making(client, climate_markets)
     )
 
 # Run the main function

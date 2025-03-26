@@ -1,15 +1,15 @@
 import asyncio
 
-async def market_making(client, climate_markets):
+async def market_making(client, markets):
     while True:
-        for market in climate_markets:
-            market_id = market['id']
+        for market in markets:
+            market_id = market['market_ticker']
             yes_bid = market.get('yes_bid')
             yes_ask = market.get('yes_ask')
 
             if yes_bid is not None and yes_ask is not None:
                 spread = yes_ask - yes_bid
-                if spread > 2:  # Need room for profit
+                if spread > 2:  # Basic profit buffer
                     buy_price = yes_bid + 1
                     sell_price = yes_ask - 1
 

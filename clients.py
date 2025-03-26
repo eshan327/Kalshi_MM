@@ -221,17 +221,14 @@ class KalshiWebSocketClient(KalshiBaseClient):
     async def on_open(self):
         """Callback when WebSocket connection is opened."""
         print("WebSocket connection opened.")
-        await self.subscribe_to_climate_tickers()
+        await self.subscribe_to_all_tickers()  # Changed here
 
-    async def subscribe_to_climate_tickers(self):
-        """Subscribe to ticker updates for climate-related markets."""
+    async def subscribe_to_all_tickers(self):
+        """Subscribe to ticker updates for all markets, no filtering."""
         subscription_message = {
             "id": self.message_id,
             "cmd": "subscribe",
-            "params": {
-                "channels": ["ticker"],
-                "market_ids": list(self.market_descriptions.keys())
-            }
+            "params": {"channels": ["ticker"]}  # Removed market_ids
         }
         await self.ws.send(json.dumps(subscription_message))
         self.message_id += 1
@@ -249,9 +246,8 @@ class KalshiWebSocketClient(KalshiBaseClient):
     async def on_message(self, message):
         """Callback for handling incoming messages."""
         parsed_message = json.loads(message)
-        market_id = parsed_message.get('msg', {}).get('market_id')
-        description = self.market_descriptions.get(market_id, "Unknown market")
-        
+        # Remove or replace this if you no longer want a description
+        description = "Generic Market"
         # Convert POSIX time to something that's actually readable
         posix_time = parsed_message.get('msg', {}).get('ts')
         if posix_time:
