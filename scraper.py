@@ -6,61 +6,83 @@ import time
 import re
 
 def market_maker():
-    driver = webdriver.Chrome()
+    driver = webdriver.Firefox()
     driver.get("https://kalshi.com/markets/kxhighny/highest-temperature-in-nyc")
     time.sleep(5)
 
-    # log in
-    # nav = driver.find_element(By.TAG_NAME, 'nav')
-    # login_button = nav.find_element(By.CLASS_NAME, 'button-0-1-15')
-    # login_span = login_button.find_element(By.CLASS_NAME, 'tabular-nums')
-    # login_button.click()
-
+    tile_group = driver.find_element(By.CLASS_NAME, 'tileGroup-0-1-124')
     while True:
-        markets = driver.find_elements(By.CLASS_NAME, 'binaryMarketTile-0-1-228')
+        markets = tile_group.find_elements(By.XPATH, "*")
+        markets = markets[0:3]
         for market in markets:
-            # label
             label = market.find_element(By.CLASS_NAME, 'flex').get_attribute("innerHTML")
+            market.click()
 
-            # yes price
+            # yes prices
             try:
-                yes_button = market.find_element(By.CLASS_NAME, 'yes-0-1-166')
-            except Exception as e:
-                yes_button = market.find_element(By.CLASS_NAME, 'yes-0-1-151')
-            yes_span1 = yes_button.find_element(By.CLASS_NAME, 'tabular-nums')
-            yes_text = yes_span1.find_element(By.CLASS_NAME, 'tabular-nums').get_attribute("innerHTML")
-            yes_price_text = yes_span1.find_elements(By.CLASS_NAME, 'tabular-nums')[-1].get_attribute("innerHTML")
+                headingContainer = market.find_elements(By.CLASS_NAME, 'headingContainer-0-1-230')[0]
+            except:
+                headingContainer = market.find_elements(By.CLASS_NAME, 'headingContainer-0-1-232')[0]
+            yes_button = headingContainer.find_elements(By.TAG_NAME, 'button')[0]
+            driver.execute_script("arguments[0].click();", yes_button)
+
+            yes_orderbook = market.find_element(By.CLASS_NAME, 'orderbookContent-0-1-280')
+            yes_prices_raw = yes_orderbook.find_elements(By.CLASS_NAME, 'orderBookItem-0-1-286')
+            yes_prices = []
+            for price in yes_prices_raw:
+                spans = price.find_elements(By.TAG_NAME, 'span')
+                if len(spans) == 5:
+                    yes_prices.append(int(re.sub(r'[^\d.]', '', spans[2].text)))
+            yes_ask_price = yes_prices[0]
+            yes_bid_price = yes_prices[1]
 
             print(f"\n{label}")
-            print("Text:", yes_text)
-            print("Price:", yes_price_text)
+            print("Contract: Yes")
+            print(f"Ask Price: {yes_ask_price}")
+            print(f"Bid Price: {yes_bid_price}")
+            if yes_ask_price - yes_bid_price >= 3:
+                print(f"Bid at {yes_bid_price + 1}\u00A2, Ask at {yes_ask_price - 1}\u00A2")
+                print(f"Profit: {yes_ask_price - yes_bid_price - 2}\u00A2")
 
-            # no price
-            no_button = market.find_element(By.CLASS_NAME, 'no-0-1-167')
-            no_span1 = no_button.find_element(By.CLASS_NAME, 'tabular-nums')
-            no_text = no_span1.find_element(By.CLASS_NAME, 'tabular-nums').get_attribute("innerHTML")
-            no_price_text = no_span1.find_elements(By.CLASS_NAME, 'tabular-nums')[-1].get_attribute("innerHTML")
+                # root_container = driver.find_element(By.CLASS_NAME, 'eventPageContent-0-1-91')
+                # order_container = root_container.find_element(By.XPATH, '//div[@data-sentry-component="PublicOrderPanel"]')
+                # buy_button = order_container.find_elements(By.CLASS_NAME, 'underlineText-0-1-265')[1]
+                # driver.execute_script("arguments[0].click();", buy_button)
+                # time.sleep(5)
 
-            print("Text:", no_text)
-            print("Price:", no_price_text)
-            if yes_price_text == "":
-                yes_price_text = "0"
-            if no_price_text == "":
-                no_price_text = "0"
-            yes_price = int(re.sub(r'[^\d.]', '', yes_price_text))
-            no_price = int(re.sub(r'[^\d.]', '', no_price_text))
-
-            if yes_price > no_price and yes_price - no_price > 0.03:
-                print(f"Buy No: {no_price + 1}\u00A2")
-                print(f"Sell Yes: {yes_price - 1}\u00A2")
-            elif no_price > yes_price and no_price - yes_price > 0.03:
-                print(f"Buy Yes: {yes_price + 1}\u00A2")
-                print(f"Sell No: {no_price - 1}\u00A2")
             else:
-                print("No arbitrage opportunity")
+                print("No market making opportunity")
 
-        assert "No results found." not in driver.page_source
-        time.sleep(0.5)
+            # no prices
+            try:
+                headingContainer = market.find_elements(By.CLASS_NAME, 'headingContainer-0-1-230')[0]
+            except:
+                headingContainer = market.find_elements(By.CLASS_NAME, 'headingContainer-0-1-232')[0]
+            no_button = headingContainer.find_elements(By.TAG_NAME, 'button')[1]
+            driver.execute_script("arguments[0].click();", no_button)
+
+            no_orderbook = driver.find_element(By.CLASS_NAME, 'orderbookContent-0-1-280')
+            no_prices_raw = no_orderbook.find_elements(By.CLASS_NAME, 'orderBookItem-0-1-286')
+            no_prices = []
+            for price in no_prices_raw:
+                spans = price.find_elements(By.TAG_NAME, 'span')
+                if len(spans) == 5:
+                    no_prices.append(int(re.sub(r'[^\d.]', '', spans[2].text)))
+            no_ask_price = no_prices[0]
+            no_bid_price = no_prices[1]
+
+            print(f"\n{label}")
+            print("Contract: No")
+            print(f"Ask Price: {no_ask_price}")
+            print(f"Bid Price: {no_bid_price}")
+            if no_ask_price - no_bid_price >= 3:
+                print(f"Bid at {no_bid_price + 1}\u00A2, Ask at {no_ask_price - 1}\u00A2")
+                print(f"Profit: {no_ask_price - no_bid_price - 2}\u00A2")
+            else:
+                print("No market making opportunity")
+
+            assert "No results found." not in driver.page_source
+            time.sleep(0.5)
 
 if __name__ == "__main__":
     market_maker()
