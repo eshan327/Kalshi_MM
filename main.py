@@ -35,19 +35,31 @@ balance = client.get_balance()
 print("Balance:", balance)
 
 # Fetch all markets
-markets = client.get_all_markets()
+markets_response = client.get_all_markets()
+all_markets = markets_response.get('markets', [])
+
+# Example filter: find only the “High Denver” ticker
+climate_markets = [
+    m for m in all_markets
+    if "HIGHDEN" in m.get('market_ticker', '')
+]
+
+# Collect IDs for subscription
+climate_market_ids = [m['market_id'] for m in climate_markets]
 
 # Initialize the WebSocket client
 ws_client = KalshiWebSocketClient(
-    key_id = KEYID,
-    private_key = private_key,
-    environment = env
+    key_id=KEYID,
+    private_key=private_key,
+    environment=env
 )
+ws_client.climate_market_ids = climate_market_ids  # store for later use
 
 async def main():
     # Run WebSocket connection and market making concurrently
     await asyncio.gather(
         ws_client.connect(),
+        market_making(client, climate_markets)
     )
 
 # Run the main function

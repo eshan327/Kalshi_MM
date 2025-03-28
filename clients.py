@@ -221,14 +221,18 @@ class KalshiWebSocketClient(KalshiBaseClient):
     async def on_open(self):
         """Callback when WebSocket connection is opened."""
         print("WebSocket connection opened.")
-        await self.subscribe_to_all_tickers()  # Changed here
+        # Subscribe to specific markets instead of everything
+        await self.subscribe_to_specific_tickers(self.climate_market_ids)
 
-    async def subscribe_to_all_tickers(self):
-        """Subscribe to ticker updates for all markets, no filtering."""
+    async def subscribe_to_specific_tickers(self, market_ids):
+        """Subscribe to ticker updates for only the specified market_ids."""
         subscription_message = {
             "id": self.message_id,
             "cmd": "subscribe",
-            "params": {"channels": ["ticker"]}  # Removed market_ids
+            "params": {
+                "channels": ["ticker"],
+                "market_ids": market_ids
+            }
         }
         await self.ws.send(json.dumps(subscription_message))
         self.message_id += 1
