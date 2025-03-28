@@ -82,7 +82,6 @@ def market_maker():
                 print("No market making opportunity")
 
             assert "No results found." not in driver.page_source
-            time.sleep(0.5)
 
 if __name__ == "__main__":
     market_maker()
