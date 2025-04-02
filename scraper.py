@@ -2,18 +2,90 @@ from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import time
 import re
+import configparser
 
 def market_maker():
+
+    # Loading config.ini
+    config = configparser.ConfigParser()
+    try:
+        config.read('config.ini')
+        username = config['Credentials']['username']
+        password = config['Credentials']['password']
+        max_position = int(config['Trading']['max_position'])
+        max_capital = int(config['Trading']['max_capital'])
+    except:
+        print("Error loading config.ini.")
+        return
+    
     driver = webdriver.Firefox()
+    
+    # Signing in first
+    driver.get("https://kalshi.com/sign-in")
+    print("Signing in...")
+    time.sleep(5)
+    
+    try:
+        username_field = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='email']"))
+        )
+        password_field = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='password']"))
+        )
+        
+        username_field.clear()
+        username_field.send_keys(username)
+        password_field.clear()
+        password_field.send_keys(password)
+        
+        login_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "button.button-0-1-19.fullWidth-0-1-21.medium-0-1-24.brand-0-1-39[type='submit']"))
+        )
+        driver.execute_script("arguments[0].click();", login_button)
+        
+        # 2FA
+        time.sleep(3)
+        current_url = driver.current_url
+        
+        if "two-factor-code" in current_url:
+            print("2FA required. Input the code.")
+            
+            max_wait = 120  # Waits up to 2 minutes for code
+            start_time = time.time()
+            
+            while "two-factor-code" in driver.current_url:
+                if time.time() - start_time > max_wait:
+                    print("Timed out waiting for 2FA")
+                    driver.quit()
+                    return
+                time.sleep(2)
+                
+            print("2FA complete.")
+        
+        WebDriverWait(driver, 30).until(
+            EC.any_of(
+                EC.url_contains("/markets"),
+                EC.url_contains("kalshi.com/"),
+                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'userMenuContainer')]"))
+            )
+        )
+        print("Login successful")
+        
+    except Exception as e:
+        print(f"Login failed: {e}")
+        driver.quit()
+        return
+    
+    # Now move to the NYC page
     driver.get("https://kalshi.com/markets/kxhighny/highest-temperature-in-nyc")
     time.sleep(5)
 
     tile_group = driver.find_element(By.CLASS_NAME, 'tileGroup-0-1-124')
     while True:
-        markets = tile_group.find_elements(By.XPATH, "*")
-        markets = markets[0:3]
+        markets = tile_group.find_elements(By.XPATH, "*")[0:3]
         for market in markets:
             label = market.find_element(By.CLASS_NAME, 'flex').get_attribute("innerHTML")
             market.click()
