@@ -11,7 +11,7 @@ import subprocess
 import time
 
 
-chrome_path = r"your path to\chrome.exe"
+chrome_path = r"C:\Users\caleb\AppData\Local\Google\Chrome\Application\chrome.exe"
 
 
 subprocess.Popen([
