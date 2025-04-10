@@ -130,9 +130,8 @@ class TradingSimulator:
                 price = self.positions[position_key]["price"]
                 print(f"No market data for {position_key}; using original price")
             
-            next_index = len(self.balance_history)
+            self.forced_trade_indices.append(len(self.balance_history))
             self.sell_contract(position_key, price)
-            self.forced_trade_indices.append(next_index)
             
         print("-----------------------------\n")
     
@@ -146,7 +145,8 @@ class TradingSimulator:
         plt.figure(figsize=(10, 6))
         
         for i in range(1, len(times)):
-            if i in self.forced_trade_indices:
+            is_forced = i in self.forced_trade_indices
+            if is_forced:
                 plt.plot([times[i-1], times[i]], [balances[i-1], balances[i]], 
                          marker='o', linestyle=':', color='red', alpha=0.7)
             else:
@@ -190,7 +190,7 @@ class TradingSimulator:
         profits = [0]
         cumulative_profit = 0
         
-        for i, (timestamp, _, action, profit) in enumerate(self.trade_history):
+        for timestamp, _, action, profit in self.trade_history:
             if action == "SELL":
                 cumulative_profit += profit
                 sell_times.append(timestamp)
@@ -201,16 +201,7 @@ class TradingSimulator:
         
         plt.figure(figsize=(10, 6))
         
-        for i in range(1, len(sell_times)):
-            trade_index = next((idx for idx, (t, _, a, _) in enumerate(self.trade_history) 
-                              if a == "SELL" and t == sell_times[i]), None)
-            
-            if trade_index is not None and trade_index in self.forced_trade_indices:
-                plt.plot([sell_times[i-1], sell_times[i]], [profits[i-1], profits[i]], 
-                         marker='o', linestyle=':', color='red', alpha=0.7)
-            else:
-                plt.plot([sell_times[i-1], sell_times[i]], [profits[i-1], profits[i]], 
-                         marker='o', linestyle='-', color='blue')
+        plt.plot(sell_times, profits, marker='o', linestyle='-', color='blue')
         
         plt.title('Profit/Loss')
         plt.xlabel('Time')
@@ -218,13 +209,6 @@ class TradingSimulator:
         plt.grid(True)
         
         plt.axhline(y=0, color='k', linestyle='-', alpha=0.3)
-        
-        from matplotlib.lines import Line2D
-        legend_elements = [
-            Line2D([0], [0], color='blue', lw=2, marker='o', label='Normal Trading'),
-            Line2D([0], [0], color='red', lw=2, linestyle=':', marker='o', label='Liquidation')
-        ]
-        plt.legend(handles=legend_elements, loc='upper left')
         
         final_profit = profits[-1]
         initial_balance = self.balance_history[0][1]
@@ -305,7 +289,7 @@ def market_maker():
     signal.signal(signal.SIGINT, signal_handler)
     
     driver = webdriver.Firefox()
-    driver.get("https://kalshi.com/markets/kxhighny/highest-temperature-in-nyc")
+    driver.get("https://kalshi.com/markets/kxhighaus/highest-temperature-in-austin")
     time.sleep(5)
     
     print("\n----- TRADING SIMULATION -----")
