@@ -368,10 +368,22 @@ def market_maker(logged_driver):
                             sell_price = yes_ask_price - 1
                             print(f"Selling {qty} at {sell_price}¢ (bought at {buy_price}¢)")
 
-                            temp_group = logged_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
-                            no_button = temp_group.find_elements(By.TAG_NAME, 'button')[1]
-                            logged_driver.execute_script("arguments[0].click();", no_button)
 
+                            temp_group = logged_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
+                            yes_button = temp_group.find_elements(By.TAG_NAME, 'button')[0]
+                            logged_driver.execute_script("arguments[0].click();", yes_button)      
+                            input_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="border-radius: 8px; border: 1px solid var(--kalshi-palette-fill-x50, rgba(0, 0, 0, 0.05));"]')  
+                            contract_input = input_container.find_elements(By.TAG_NAME, 'input')[0]
+                            contract_input.clear()
+                            contract_input.send_keys('1')
+                            limit_input = input_container.find_elements(By.TAG_NAME, 'input')[1]
+                            limit_input.clear()
+                            limit_input.send_keys(sell_price)
+                            review_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; flex-direction: column; margin-top: 8px;"]')                         
+                            review_button = review_container.find_elements(By.TAG_NAME, 'button')[0]
+                            logged_driver.execute_script("arguments[0].click();", review_button)                         
+                            time.sleep(5)
+                            
                                 
                             simulator.sell_contract(position_key, sell_price)
                             simulator.sell_on_next_iteration = False
@@ -380,15 +392,25 @@ def market_maker(logged_driver):
                             print(f"Profit: {yes_ask_price - yes_bid_price - 2}\u00A2")
                             if simulator.get_total_open_contracts() < simulator.max_open_positions:
 
+                            
+                                buy_price = yes_bid_price + 1
                                 temp_group = logged_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
                                 yes_button = temp_group.find_elements(By.TAG_NAME, 'button')[0]
-                                logged_driver.execute_script("arguments[0].click();", yes_button)                                
-                                
-                                # container = logged_driver.find_element(By.CSS_SELECTOR, '[style*="display: flex"][style*="justify-content: space-between"][style*="align-items: center"][style*="flex: 1 0 0%"]')
-                                # no_button = container.find_elements(By.TAG_NAME, 'button')[1]
+                                logged_driver.execute_script("arguments[0].click();", yes_button)      
+                                input_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="border-radius: 8px; border: 1px solid var(--kalshi-palette-fill-x50, rgba(0, 0, 0, 0.05));"]')  
+                                contract_input = input_container.find_elements(By.TAG_NAME, 'input')[0]
+                                contract_input.clear()
+                                contract_input.send_keys('1')
+                                limit_input = input_container.find_elements(By.TAG_NAME, 'input')[1]
+                                limit_input.clear()
+                                limit_input.send_keys(buy_price)
+                                review_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; flex-direction: column; margin-top: 8px;"]')                         
+                                review_button = review_container.find_elements(By.TAG_NAME, 'button')[0]
+                                logged_driver.execute_script("arguments[0].click();", review_button) 
+                                time.sleep(5)
 
                                 
-                                simulator.buy_contract(contract_id, "yes", yes_bid_price + 1)
+                                simulator.buy_contract(contract_id, "yes", buy_price)
                         else:
                             print("No market making opportunity")
                     else:
@@ -429,6 +451,23 @@ def market_maker(logged_driver):
                             qty = simulator.positions[position_key]["qty"]
                             sell_price = no_ask_price - 1
                             print(f"Selling {qty} at {sell_price}¢ (bought at {buy_price}¢)")
+
+
+                            temp_group = logged_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
+                            no_button = temp_group.find_elements(By.TAG_NAME, 'button')[1]
+                            logged_driver.execute_script("arguments[0].click();", no_button)      
+                            input_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="border-radius: 8px; border: 1px solid var(--kalshi-palette-fill-x50, rgba(0, 0, 0, 0.05));"]')  
+                            contract_input = input_container.find_elements(By.TAG_NAME, 'input')[0]
+                            contract_input.clear()
+                            contract_input.send_keys('1')
+                            limit_input = input_container.find_elements(By.TAG_NAME, 'input')[1]
+                            limit_input.clear()
+                            limit_input.send_keys(sell_price)
+                            review_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; flex-direction: column; margin-top: 8px;"]')                         
+                            review_button = review_container.find_elements(By.TAG_NAME, 'button')[0]
+                            logged_driver.execute_script("arguments[0].click();", review_button) 
+                            time.sleep(5)
+
                             
                             simulator.sell_contract(position_key, sell_price)
                             simulator.sell_on_next_iteration = False
@@ -436,7 +475,26 @@ def market_maker(logged_driver):
                             print(f"Bid at {no_bid_price + 1}\u00A2, Ask at {no_ask_price - 1}\u00A2")
                             print(f"Profit: {no_ask_price - no_bid_price - 2}\u00A2")
                             if simulator.get_total_open_contracts() < simulator.max_open_positions:
-                                simulator.buy_contract(contract_id, "no", no_bid_price + 1)
+
+
+                                buy_price = no_bid_price + 1
+                                temp_group = logged_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
+                                no_button = temp_group.find_elements(By.TAG_NAME, 'button')[1]
+                                logged_driver.execute_script("arguments[0].click();", no_button)      
+                                input_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="border-radius: 8px; border: 1px solid var(--kalshi-palette-fill-x50, rgba(0, 0, 0, 0.05));"]')  
+                                contract_input = input_container.find_elements(By.TAG_NAME, 'input')[0]
+                                contract_input.clear()
+                                contract_input.send_keys('1')
+                                limit_input = input_container.find_elements(By.TAG_NAME, 'input')[1]
+                                limit_input.clear()
+                                limit_input.send_keys(buy_price)
+                                review_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; flex-direction: column; margin-top: 8px;"]')                         
+                                review_button = review_container.find_elements(By.TAG_NAME, 'button')[0]
+                                logged_driver.execute_script("arguments[0].click();", review_button) 
+                                time.sleep(5)
+
+                            
+                                simulator.buy_contract(contract_id, "no", buy_price)
                         else:
                             print("No market making opportunity")
                     else:
