@@ -551,6 +551,7 @@ def login(driver):
 if __name__ == "__main__":
     driver = webdriver.Firefox()
     market_url = login(driver)
+    time.sleep(2)
     try:
         dollars_button = driver.find_elements(By.CLASS_NAME, 'interactiveHeader-0-1-247')[0]
     except:
