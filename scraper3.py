@@ -460,8 +460,11 @@ def market_maker(logged_driver, market_url):
 
 def place_order(logged_driver, label, yes_no, buy_sell, price, qty, wait_time=5):
     temp_group = logged_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
-    yes_no_button = temp_group.find_elements(By.TAG_NAME, 'button')[yes_no]
-    logged_driver.execute_script("arguments[0].click();", yes_no_button)      
+    yes_no_button = temp_group.find_elements(By.TAG_NAME, 'button')[0]
+    logged_driver.execute_script("arguments[0].click();", yes_no_button)
+    yes_no_container = driver.find_element(By.CSS_SELECTOR, '[style="display: flex; justify-content: space-between; align-items: center; flex: 1 0 0%;"]')
+    yes_no_button = yes_no_container.find_elements(By.TAG_NAME, 'button')[yes_no]  
+    logged_driver.execute_script("arguments[0].click();", yes_no_button)         
     buy_sell_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; justify-content: space-between; align-items: center; box-sizing: border-box; border-bottom: 1px solid var(--kalshi-palette-fill-x50, rgba(0, 0, 0, 0.05));"]')
     buy_sell_button = buy_sell_container.find_elements(By.CSS_SELECTOR, '[style="display: flex; min-width: 32px; justify-content: center; align-items: center;"]')[buy_sell]
     logged_driver.execute_script("arguments[0].click();", buy_sell_button)
