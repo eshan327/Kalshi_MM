@@ -24,9 +24,33 @@ class TradingSimulator:
         self.max_open_positions = 10
         self.sell_on_next_iteration = False
         self.forced_trade_indices = []
-        
+        self.order_tracker = OrderTracker()
+
+         # New methods to handle order tracking
+    def place_order_on_kalshi(self, logged_driver, label, yes_no, buy_sell, price, qty):
+        """Place an order on Kalshi but don't update simulator yet"""
+        order = place_order(logged_driver, label, yes_no, buy_sell, price, qty)
+        if order:
+            self.order_tracker.add_pending_order(order)
+        return order
+    
+    def process_filled_orders(self, logged_driver):
+        """Check for filled orders and update simulator state"""
+        for filled_order in self.order_tracker.check_fills(logged_driver):
+            contract_id = f"kalshi_{len(self.trade_history)}"  # Generate a unique ID
+            
+            if filled_order.buy_sell == 0:  # Buy order
+                contract_type = "yes" if filled_order.yes_no == 0 else "no"
+                self.buy_contract(contract_id, contract_type, filled_order.price)
+            else:  # Sell order
+                position_key = f"{contract_id}_{contract_type}"
+                self.sell_contract(position_key, filled_order.price)
+    
+    def check_order_fills(self, logged_driver):
+        self.order_tracker.check_fills_and_confirm(logged_driver)
+
     def generate_next_sell_time(self):
-        seconds = random.uniform(30, 90)
+        seconds = random.uniform(10, 15)
         return datetime.datetime.now() + datetime.timedelta(seconds=seconds)
     
     def get_total_open_contracts(self):
@@ -297,7 +321,7 @@ def market_maker(logged_driver, market_url):
     
     print("\n----- TRADING SIMULATION -----")
     print(f"Strategy: Buy up to {simulator.max_open_positions} contracts where spread ≥ 3¢")
-    print(f"Selling one contract every 30-90 seconds to simulate Kalshi's liquidity and volume")
+    # print(f"Selling one contract every 30-90 seconds to simulate Kalshi's liquidity and volume")
     print("-----------------------------\n")
     
     start_time = datetime.datetime.now()
@@ -305,6 +329,7 @@ def market_maker(logged_driver, market_url):
     try:
         tile_group = driver.find_element(By.CLASS_NAME, 'tileGroup-0-1-124')
         while True:
+            simulator.process_filled_orders(logged_driver)
             markets = tile_group.find_elements(By.XPATH, "*")
             markets = markets[0:3]
             markets_data = []
@@ -352,18 +377,18 @@ def market_maker(logged_driver, market_url):
                             sell_price = yes_ask_price - 1
                             print(f"Selling {qty} at {sell_price}¢ (bought at {buy_price}¢)")
 
-                            place_order(logged_driver=logged_driver, label=label, yes_no=0, buy_sell=1, price=sell_price, qty=qty)
+                            simulator.place_order_on_kalshi(logged_driver, label, yes_no=0, buy_sell=1, price=sell_price, qty=qty)
                                 
-                            simulator.sell_contract(position_key, sell_price)
-                            simulator.sell_on_next_iteration = False
+                            # simulator.sell_contract(position_key, sell_price)
+                            # simulator.sell_on_next_iteration = False
                         elif yes_ask_price - yes_bid_price >= 3:
                             print(f"Bid at {yes_bid_price + 1}\u00A2, Ask at {yes_ask_price - 1}\u00A2")
                             print(f"Profit: {yes_ask_price - yes_bid_price - 2}\u00A2")
                             if simulator.get_total_open_contracts() < simulator.max_open_positions:
 
-                                place_order(logged_driver=logged_driver, label=label, yes_no=0, buy_sell=0, price=yes_bid_price + 1, qty=1)
+                                simulator.place_order_on_kalshi(logged_driver, label, yes_no=0, buy_sell=0, price=yes_bid_price + 1, qty=1)
                                 
-                                simulator.buy_contract(contract_id, "yes", yes_bid_price + 1)
+                                # simulator.buy_contract(contract_id, "yes", yes_bid_price + 1)
                         else:
                             print("No market making opportunity")
                     else:
@@ -405,18 +430,18 @@ def market_maker(logged_driver, market_url):
                             sell_price = no_ask_price - 1
                             print(f"Selling {qty} at {sell_price}¢ (bought at {buy_price}¢)")
 
-                            place_order(logged_driver=logged_driver, label=label, yes_no=1, buy_sell=1, price=sell_price, qty=qty)
+                            simulator.place_order_on_kalshi(logged_driver, label, yes_no=1, buy_sell=1, price=sell_price, qty=qty)
                             
-                            simulator.sell_contract(position_key, sell_price)
-                            simulator.sell_on_next_iteration = False
+                            # simulator.sell_contract(position_key, sell_price)
+                            # simulator.sell_on_next_iteration = False
                         elif no_ask_price - no_bid_price >= 3:
                             print(f"Bid at {no_bid_price + 1}\u00A2, Ask at {no_ask_price - 1}\u00A2")
                             print(f"Profit: {no_ask_price - no_bid_price - 2}\u00A2")
                             if simulator.get_total_open_contracts() < simulator.max_open_positions:
                                 sell_price = no_ask_price + 1
-                                place_order(logged_driver=logged_driver, label=label, yes_no=1, buy_sell=0, price=no_bid_price + 1,qty=1)
+                                simulator.place_order_on_kalshi(logged_driver, label, yes_no=1, buy_sell=0, price=no_bid_price + 1, qty=1)
                             
-                                simulator.buy_contract(contract_id, "no", no_bid_price + 1)
+                                # simulator.buy_contract(contract_id, "no", no_bid_price + 1)
                         else:
                             print("No market making opportunity")
                     else:
@@ -458,27 +483,88 @@ def market_maker(logged_driver, market_url):
         except:
             pass
 
+class Order:
+    def __init__(self, label, yes_no, buy_sell, price, qty, order_id=None):
+        self.label = label
+        self.yes_no = yes_no  # 0 for Yes, 1 for No
+        self.buy_sell = buy_sell  # 0 for Buy, 1 for Sell
+        self.price = price
+        self.qty = qty
+        self.timestamp = datetime.datetime.now()
+        self.order_id = order_id  # Unique ID from Kalshi if available
+        self.filled = False
+        self.fill_timestamp = None
+    
+    def __str__(self):
+        contract_type = "Yes" if self.yes_no == 0 else "No"
+        action = "Buy" if self.buy_sell == 0 else "Sell"
+        status = "Filled" if self.filled else "Pending"
+        return f"{self.label} - {contract_type} - {action} - {self.price}¢ - {self.qty} contracts - {status}"
+    
+    def mark_as_filled(self):
+        self.filled = True
+        self.fill_timestamp = datetime.datetime.now()
+        
 def place_order(logged_driver, label, yes_no, buy_sell, price, qty, wait_time=5):
-    temp_group = logged_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
-    yes_no_button = temp_group.find_elements(By.TAG_NAME, 'button')[0]
-    logged_driver.execute_script("arguments[0].click();", yes_no_button)
-    yes_no_container = driver.find_element(By.CSS_SELECTOR, '[style="display: flex; justify-content: space-between; align-items: center; flex: 1 0 0%;"]')
-    yes_no_button = yes_no_container.find_elements(By.TAG_NAME, 'button')[yes_no]  
-    logged_driver.execute_script("arguments[0].click();", yes_no_button)         
-    buy_sell_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; justify-content: space-between; align-items: center; box-sizing: border-box; border-bottom: 1px solid var(--kalshi-palette-fill-x50, rgba(0, 0, 0, 0.05));"]')
-    buy_sell_button = buy_sell_container.find_elements(By.CSS_SELECTOR, '[style="display: flex; min-width: 32px; justify-content: center; align-items: center;"]')[buy_sell]
-    logged_driver.execute_script("arguments[0].click();", buy_sell_button)
-    input_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="border-radius: 8px; border: 1px solid var(--kalshi-palette-fill-x50, rgba(0, 0, 0, 0.05));"]')  
-    contract_input = input_container.find_elements(By.TAG_NAME, 'input')[0]
-    contract_input.clear()
-    contract_input.send_keys(qty)
-    limit_input = input_container.find_elements(By.TAG_NAME, 'input')[1]
-    limit_input.clear()
-    limit_input.send_keys(price)
-    review_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; flex-direction: column; margin-top: 8px;"]')                         
-    review_button = review_container.find_elements(By.TAG_NAME, 'button')[0]
-    logged_driver.execute_script("arguments[0].click();", review_button) 
-    time.sleep(wait_time)
+    order = Order(label, yes_no, buy_sell, price, qty)
+    
+    try:
+        temp_group = logged_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
+        yes_button = temp_group.find_elements(By.CLASS_NAME, 'pill-0-1-149.textOnly-0-1-150.yes-0-1-173')[0]
+        logged_driver.execute_script("arguments[0].click();", yes_button)
+        
+        yes_no_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; justify-content: space-between; align-items: center; flex: 1 0 0%;"]')
+        yes_no_button = yes_no_container.find_elements(By.TAG_NAME, 'button')[yes_no]  
+        logged_driver.execute_script("arguments[0].click();", yes_no_button)         
+        
+        buy_sell_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; justify-content: space-between; align-items: center; box-sizing: border-box; border-bottom: 1px solid var(--kalshi-palette-fill-x50, rgba(0, 0, 0, 0.05));"]')
+        buy_sell_button = buy_sell_container.find_elements(By.CSS_SELECTOR, '[style="display: flex; min-width: 32px; justify-content: center; align-items: center;"]')[buy_sell]
+        logged_driver.execute_script("arguments[0].click();", buy_sell_button)
+        
+        input_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="border-radius: 8px; border: 1px solid var(--kalshi-palette-fill-x50, rgba(0, 0, 0, 0.05));"]')  
+        contract_input = input_container.find_elements(By.TAG_NAME, 'input')[0]
+        contract_input.clear()
+        contract_input.send_keys(qty)
+        
+        limit_input = input_container.find_elements(By.TAG_NAME, 'input')[1]
+        limit_input.clear()
+        limit_input.send_keys(price)
+        
+        review_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; flex-direction: column; margin-top: 8px;"]')                         
+        review_button = review_container.find_elements(By.TAG_NAME, 'button')[0]
+        logged_driver.execute_script("arguments[0].click();", review_button) 
+    
+        confirm_container = logged_driver.find_element(By.CLASS_NAME, 'flex.gap-2')
+        confirm_button = confirm_container.find_elements(By.TAG_NAME, 'button')[1]
+        logged_driver.execute_script("arguments[0].click();", confirm_button)
+        
+        print(f"Order placed on Kalshi: {order}")
+        time.sleep(wait_time)
+        return order
+        
+    except Exception as e:
+        print(f"Failed to place order on Kalshi: {e}")
+        return None
+    
+class OrderTracker:
+    def __init__(self):
+        self.pending_orders = []
+        self.filled_orders = []
+    
+    def add_pending_order(self, order):
+        if order is not None:
+            self.pending_orders.append(order)
+            print(f"Added pending order: {order}")
+    
+    def check_fills(self, logged_driver):
+        print("Checking for order fills... (placeholder)")
+        for order in self.pending_orders[:]:
+            # if random.randint(0, 4) > 2:
+            order.mark_as_filled()
+            self.pending_orders.remove(order)
+            self.filled_orders.append(order)
+            print(f"Order filled: {order}")
+            yield order
 
 def login(driver):
     config = configparser.ConfigParser()
