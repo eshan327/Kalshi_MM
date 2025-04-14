@@ -21,7 +21,7 @@ class TradingSimulator:
         self.trade_history = []  # [(timestamp, balance, action, profit)]
         self.balance_history = [(datetime.datetime.now(), initial_balance)]
         self.next_sell_time = self.generate_next_sell_time()
-        self.max_open_positions = 10
+        self.max_open_positions = 2
         self.sell_on_next_iteration = False
         self.forced_trade_indices = []
         self.order_tracker = OrderTracker()
@@ -34,9 +34,10 @@ class TradingSimulator:
             self.order_tracker.add_pending_order(order)
         return order
     
-    def process_filled_orders(self, logged_driver):
+    def process_filled_orders(self, order_driver):
         """Check for filled orders and update simulator state"""
-        for filled_order in self.order_tracker.check_fills(logged_driver):
+        filled_orders = self.order_tracker.check_fills(order_driver)
+        for filled_order in filled_orders:
             contract_id = f"kalshi_{len(self.trade_history)}"  # Generate a unique ID
             
             if filled_order.buy_sell == 0:  # Buy order
@@ -45,9 +46,6 @@ class TradingSimulator:
             else:  # Sell order
                 position_key = f"{contract_id}_{contract_type}"
                 self.sell_contract(position_key, filled_order.price)
-    
-    def check_order_fills(self, logged_driver):
-        self.order_tracker.check_fills_and_confirm(logged_driver)
 
     def generate_next_sell_time(self):
         seconds = random.uniform(10, 15)
@@ -264,7 +262,7 @@ class TradingSimulator:
         regular_sells = [i for i, (_, _, action, _) in enumerate(self.trade_history) 
                         if action == "SELL" and i not in self.forced_trade_indices]
         forced_sells = [i for i, (_, _, action, _) in enumerate(self.trade_history) 
-                       if action == "SELL" and i in self.forced_trade_indices]
+                    if action == "SELL" and i in self.forced_trade_indices]
         
         regular_count = len(regular_sells)
         forced_count = len(forced_sells)
@@ -273,14 +271,19 @@ class TradingSimulator:
         print(f"Regular sells: {regular_count}")
         print(f"Forced sells: {forced_count}")
         
+        # Add order tracking statistics
+        print(f"Total orders placed: {self.order_tracker.total_orders_placed}")
+        print(f"Total orders filled: {self.order_tracker.total_orders_filled}")
+        print(f"Orders fill rate: {(self.order_tracker.total_orders_filled/self.order_tracker.total_orders_placed)*100:.2f}%" if self.order_tracker.total_orders_placed > 0 else "N/A")
+        
         if regular_count > 0:
             profitable = sum(1 for i, (_, _, action, profit) in enumerate(self.trade_history) 
-                           if action == "SELL" and profit > 0 and i not in self.forced_trade_indices)
+                        if action == "SELL" and profit > 0 and i not in self.forced_trade_indices)
             
             print(f"Win rate: {(profitable/regular_count)*100:.2f}%")
             
             profits = [p for i, (_, _, action, p) in enumerate(self.trade_history) 
-                     if action == "SELL" and p > 0 and i not in self.forced_trade_indices]
+                    if action == "SELL" and p > 0 and i not in self.forced_trade_indices]
             losses = [p for i, (_, _, action, p) in enumerate(self.trade_history) 
                     if action == "SELL" and p <= 0 and i not in self.forced_trade_indices]
             
@@ -292,7 +295,7 @@ class TradingSimulator:
         
         print("---------------------------\n")
 
-def market_maker(logged_driver, market_url):
+def market_maker(logged_driver, order_driver, market_url):
     
     simulator = TradingSimulator(initial_balance=1000)
     markets_data = []
@@ -329,7 +332,7 @@ def market_maker(logged_driver, market_url):
     try:
         tile_group = driver.find_element(By.CLASS_NAME, 'tileGroup-0-1-124')
         while True:
-            simulator.process_filled_orders(logged_driver)
+            simulator.process_filled_orders(order_driver)
             markets = tile_group.find_elements(By.XPATH, "*")
             markets = markets[0:3]
             markets_data = []
@@ -550,21 +553,63 @@ class OrderTracker:
     def __init__(self):
         self.pending_orders = []
         self.filled_orders = []
+        self.total_orders_placed = 0
+        self.total_orders_filled = 0
     
     def add_pending_order(self, order):
         if order is not None:
             self.pending_orders.append(order)
+            self.total_orders_placed += 1
             print(f"Added pending order: {order}")
+            print(f"Total orders placed: {self.total_orders_placed}, Filled: {self.total_orders_filled}, Pending: {len(self.pending_orders)}")
     
-    def check_fills(self, logged_driver):
-        print("Checking for order fills... (placeholder)")
-        for order in self.pending_orders[:]:
-            # if random.randint(0, 4) > 2:
-            order.mark_as_filled()
-            self.pending_orders.remove(order)
-            self.filled_orders.append(order)
-            print(f"Order filled: {order}")
-            yield order
+    def check_fills(self, order_driver):
+        """Check which orders have been filled using orders tab"""
+        print("Checking for order fills...")
+        filled_orders = []
+        
+        try:
+            order_driver.refresh()
+            time.sleep(2)  
+            
+            orders_table = order_driver.find_element(By.CLASS_NAME, "tableBox-0-1-123.fullWidth-0-1-121")
+            order_rows = orders_table.find_elements(By.CLASS_NAME, "row-0-1-188.interactive-0-1-189")            
+            print(f"Found {len(order_rows)} order entries")
+            
+            for pending_order in list(self.pending_orders):
+                order_filled = False
+                
+                for row in order_rows:
+                    try:
+                        label_parts = pending_order.label.split("°")
+                        temp_start = label_parts[0].strip()
+                        # temp_end = label_parts[1].replace("to", "").strip()
+
+                        market_text = row.find_elements(By.TAG_NAME, 'a')[0].text
+                        status_text = row.find_elements(By.TAG_NAME, 'span')[0].text
+                        
+                        print(temp_start, market_text, status_text)
+
+                        if temp_start in market_text:
+                            if (("Order Filled" in status_text and pending_order.buy_sell == 0) or
+                                ("Trade Completed" in status_text and pending_order.buy_sell == 1)):
+                                order_filled = True
+                                filled_orders.append(pending_order)
+                                self.pending_orders.remove(pending_order)
+                                pending_order.mark_as_filled()
+                                self.filled_orders.append(pending_order)
+                                self.total_orders_filled += 1
+                                print(f"Order confirmed filled: {pending_order}")
+                                break
+                    except Exception as e:
+                        print(f"Error processing order row: {e}")
+            
+            print(f"Total orders placed: {self.total_orders_placed}, Filled: {self.total_orders_filled}, Pending: {len(self.pending_orders)}")
+            return filled_orders
+            
+        except Exception as e:
+            print(f"Error checking order fills: {e}")
+            return []
 
 def login(driver):
     config = configparser.ConfigParser()
@@ -634,6 +679,21 @@ def login(driver):
     time.sleep(2)
     return market_url
 
+def setup_orders_window(driver):
+    """Create a new tab in the existing driver to monitor orders"""
+    try:
+        login(driver)
+        driver.get("https://kalshi.com/account/activity")
+        # container = driver.find_element(By.CLASS_NAME, 'pills-0-1-156')
+        # orders_tab = container.find_elements(By.TAG_NAME, 'button')[4]
+        # driver.execute_script("arguments[0].click();", orders_tab)
+        print("Created order monitoring tab")
+        time.sleep(3) 
+        
+    except Exception as e:
+        print(f"Error creating orders tab: {e}")
+        orders_window = None
+
 if __name__ == "__main__":
     driver = webdriver.Firefox()
     market_url = login(driver)
@@ -646,6 +706,8 @@ if __name__ == "__main__":
     container = driver.find_element(By.CSS_SELECTOR, '[style="display: flex; min-width: 200px; padding: 4px 16px;"]')
     limit_button = container.find_elements(By.CLASS_NAME, 'row-0-1-133.interactive-0-1-134')[2]
     driver.execute_script("arguments[0].click();", limit_button)
+    order_driver = webdriver.Firefox()
+    setup_orders_window(order_driver)
     time.sleep(5)
 
-    market_maker(driver, market_url)
+    market_maker(driver, order_driver, market_url)
