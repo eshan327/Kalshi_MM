@@ -346,15 +346,12 @@ def market_maker(logged_driver, order_driver, market_url):
                     market.click()
     
                     # yes prices
-                    try:
-                        headingContainer = market.find_elements(By.CLASS_NAME, 'headingContainer-0-1-230')[0]
-                    except:
-                        headingContainer = market.find_elements(By.CLASS_NAME, 'headingContainer-0-1-232')[0]
+                    headingContainer = market.find_element(By.CSS_SELECTOR, "[class^='headingContainer']")
                     yes_button = headingContainer.find_elements(By.TAG_NAME, 'button')[0]
                     driver.execute_script("arguments[0].click();", yes_button)
     
-                    yes_orderbook = market.find_element(By.CLASS_NAME, 'orderbookContent-0-1-280')
-                    yes_prices_raw = yes_orderbook.find_elements(By.CLASS_NAME, 'orderBookItem-0-1-286')
+                    yes_orderbook = market.find_element(By.CSS_SELECTOR, "[class^='orderbookContent']")
+                    yes_prices_raw = yes_orderbook.find_elements(By.CSS_SELECTOR, "[class^='orderBookItem']")
                     yes_prices = []
                     for price in yes_prices_raw:
                         spans = price.find_elements(By.TAG_NAME, 'span')
@@ -399,15 +396,12 @@ def market_maker(logged_driver, order_driver, market_url):
                         print("Contract: Yes - Insufficient data")
     
                     # no prices
-                    try:
-                        headingContainer = market.find_elements(By.CLASS_NAME, 'headingContainer-0-1-230')[0]
-                    except:
-                        headingContainer = market.find_elements(By.CLASS_NAME, 'headingContainer-0-1-232')[0]
+                    headingContainer = market.find_element(By.CSS_SELECTOR, "[class^='headingContainer']")
                     no_button = headingContainer.find_elements(By.TAG_NAME, 'button')[1]
                     driver.execute_script("arguments[0].click();", no_button)
     
-                    no_orderbook = market.find_element(By.CLASS_NAME, 'orderbookContent-0-1-280')
-                    no_prices_raw = no_orderbook.find_elements(By.CLASS_NAME, 'orderBookItem-0-1-286')
+                    no_orderbook = market.find_element(By.CSS_SELECTOR, "[class^='orderbookContent']")
+                    no_prices_raw = no_orderbook.find_elements(By.CSS_SELECTOR, "[class^='orderBookItem']")
                     no_prices = []
                     for price in no_prices_raw:
                         spans = price.find_elements(By.TAG_NAME, 'span')
@@ -513,7 +507,7 @@ def place_order(logged_driver, label, yes_no, buy_sell, price, qty, wait_time=5)
     
     try:
         temp_group = logged_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
-        yes_button = temp_group.find_elements(By.CLASS_NAME, 'pill-0-1-149.textOnly-0-1-150.yes-0-1-173')[0]
+        yes_button = temp_group.find_elements(By.CSS_SELECTOR, "[class^='pill']")[0]
         logged_driver.execute_script("arguments[0].click();", yes_button)
         
         yes_no_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; justify-content: space-between; align-items: center; flex: 1 0 0%;"]')
@@ -572,8 +566,9 @@ class OrderTracker:
             order_driver.refresh()
             time.sleep(2)  
             
-            orders_table = order_driver.find_element(By.CLASS_NAME, "tableBox-0-1-123.fullWidth-0-1-121")
-            order_rows = orders_table.find_elements(By.CLASS_NAME, "row-0-1-188.interactive-0-1-189")            
+            orders_table = order_driver.find_element(By.CSS_SELECTOR, "[class^='tableBox'][class*='fullWidth']")
+            order_rows = orders_table.find_elements(By.CSS_SELECTOR, "[class^='row'][class*='interactive']")
+  
             print(f"Found {len(order_rows)} order entries")
             
             for pending_order in list(self.pending_orders):
@@ -641,8 +636,11 @@ def login(driver):
         password_field.send_keys(password)
         
         login_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "button.button-0-1-19.fullWidth-0-1-21.medium-0-1-24.brand-0-1-39[type='submit']"))
+            EC.element_to_be_clickable((
+                By.CSS_SELECTOR, "button[class^='button'][class*='fullWidth'][class*='medium'][class*='brand'][type='submit']"
+            ))
         )
+
         driver.execute_script("arguments[0].click();", login_button)
         
         time.sleep(3)
@@ -698,13 +696,10 @@ if __name__ == "__main__":
     driver = webdriver.Firefox()
     market_url = login(driver)
     time.sleep(2)
-    try:
-        dollars_button = driver.find_elements(By.CLASS_NAME, 'interactiveHeader-0-1-247')[0]
-    except:
-        dollars_button = driver.find_elements(By.CLASS_NAME, 'interactiveHeader-0-1-249')[0]
+    dollars_button = driver.find_elements(By.CSS_SELECTOR, "[class^='interactiveHeader']")[0]
     driver.execute_script("arguments[0].click();", dollars_button)
     container = driver.find_element(By.CSS_SELECTOR, '[style="display: flex; min-width: 200px; padding: 4px 16px;"]')
-    limit_button = container.find_elements(By.CLASS_NAME, 'row-0-1-133.interactive-0-1-134')[2]
+    limit_button = container.find_elements(By.CSS_SELECTOR, "[class^='row'][class*='interactive']")[2]
     driver.execute_script("arguments[0].click();", limit_button)
     order_driver = webdriver.Firefox()
     setup_orders_window(order_driver)
