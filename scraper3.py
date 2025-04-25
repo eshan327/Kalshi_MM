@@ -27,8 +27,19 @@ class TradingSimulator:
         self.order_tracker = OrderTracker()
 
          # New methods to handle order tracking
+    
     def place_order_on_kalshi(self, logged_driver, label, yes_no, buy_sell, price, qty):
         """Place an order on Kalshi but don't update simulator yet"""
+        # Check position limits before attempting to place buy orders
+        if buy_sell == 0:  # Buy order
+            current_open_positions = self.get_total_open_contracts()
+            pending_buy_orders = sum(1 for order in self.order_tracker.pending_orders if order.buy_sell == 0)
+            total_potential_positions = current_open_positions + pending_buy_orders
+            
+            if total_potential_positions >= self.max_open_positions:
+                print(f"Position limit reached ({self.max_open_positions}). Open: {current_open_positions}, Pending buys: {pending_buy_orders}")
+                return None
+    
         order = place_order(logged_driver, label, yes_no, buy_sell, price, qty)
         if order:
             self.order_tracker.add_pending_order(order)
@@ -38,14 +49,28 @@ class TradingSimulator:
         """Check for filled orders and update simulator state"""
         filled_orders = self.order_tracker.check_fills(order_driver)
         for filled_order in filled_orders:
-            contract_id = f"kalshi_{len(self.trade_history)}"  # Generate a unique ID
+            # Generate a unique contract ID based on order details
+            contract_id = f"kalshi_{filled_order.label.replace(' ', '_')}_{int(time.time())}"
             
             if filled_order.buy_sell == 0:  # Buy order
                 contract_type = "yes" if filled_order.yes_no == 0 else "no"
                 self.buy_contract(contract_id, contract_type, filled_order.price)
+                print(f"Updated simulator: Bought {contract_type} contract for {filled_order.label}")
             else:  # Sell order
-                position_key = f"{contract_id}_{contract_type}"
-                self.sell_contract(position_key, filled_order.price)
+                # Find matching position to sell
+                position_to_sell = None
+                for pos_key, pos_data in self.positions.items():
+                    pos_type = "yes" if filled_order.yes_no == 0 else "no"
+                    if pos_data["type"] == pos_type:
+                        position_to_sell = pos_key
+                        break
+                
+                if position_to_sell:
+                    self.sell_contract(position_to_sell, filled_order.price)
+                    print(f"Updated simulator: Sold {pos_type} contract for {filled_order.label}")
+                    self.sell_on_next_iteration = False
+                else:
+                    print(f"Warning: No matching position found to sell for {filled_order.label}")
 
     def generate_next_sell_time(self):
         seconds = random.uniform(10, 15)
@@ -330,9 +355,23 @@ def market_maker(logged_driver, order_driver, market_url):
     start_time = datetime.datetime.now()
     
     try:
-        tile_group = driver.find_element(By.CLASS_NAME, 'tileGroup-0-1-124')
+        # tile_group = driver.find_element(By.CLASS_NAME, 'tileGroup-0-1-124')
+        tile_group = driver.find_element(By.CSS_SELECTOR, "[class^='tileGroup']")
         while True:
             simulator.process_filled_orders(order_driver)
+
+            # Get current position count after processing fills
+            current_positions = simulator.get_total_open_contracts()
+            pending_buys = sum(1 for order in simulator.order_tracker.pending_orders if order.buy_sell == 0)
+            
+            print(f"\nCurrent positions: {current_positions}/{simulator.max_open_positions}, Pending buys: {pending_buys}")
+            
+            # Skip market scanning if we're at or over position limit
+            # if current_positions + pending_buys >= simulator.max_open_positions:
+            #     print("At position limit, skipping market scan")
+            #     time.sleep(5)
+            #     continue
+
             markets = tile_group.find_elements(By.XPATH, "*")
             markets = markets[0:3]
             markets_data = []
@@ -384,11 +423,13 @@ def market_maker(logged_driver, order_driver, market_url):
                         elif yes_ask_price - yes_bid_price >= 3:
                             print(f"Bid at {yes_bid_price + 1}\u00A2, Ask at {yes_ask_price - 1}\u00A2")
                             print(f"Profit: {yes_ask_price - yes_bid_price - 2}\u00A2")
-                            if simulator.get_total_open_contracts() < simulator.max_open_positions:
+                            current_positions = simulator.get_total_open_contracts()
+                            pending_buys = sum(1 for order in simulator.order_tracker.pending_orders if order.buy_sell == 0)
+                            if current_positions + pending_buys < simulator.max_open_positions:
 
                                 simulator.place_order_on_kalshi(logged_driver, label, yes_no=0, buy_sell=0, price=yes_bid_price + 1, qty=1)
-                                
-                                # simulator.buy_contract(contract_id, "yes", yes_bid_price + 1)
+                            else:
+                                print(f"Skipping buy: position limit reached ({current_positions} positions, {pending_buys} pending buys)")
                         else:
                             print("No market making opportunity")
                     else:
@@ -434,11 +475,14 @@ def market_maker(logged_driver, order_driver, market_url):
                         elif no_ask_price - no_bid_price >= 3:
                             print(f"Bid at {no_bid_price + 1}\u00A2, Ask at {no_ask_price - 1}\u00A2")
                             print(f"Profit: {no_ask_price - no_bid_price - 2}\u00A2")
-                            if simulator.get_total_open_contracts() < simulator.max_open_positions:
+
+                            current_positions = simulator.get_total_open_contracts()
+                            pending_buys = sum(1 for order in simulator.order_tracker.pending_orders if order.buy_sell == 0)
+                            if current_positions + pending_buys < simulator.max_open_positions:
                                 sell_price = no_ask_price + 1
                                 simulator.place_order_on_kalshi(logged_driver, label, yes_no=1, buy_sell=0, price=no_bid_price + 1, qty=1)
-                            
-                                # simulator.buy_contract(contract_id, "no", no_bid_price + 1)
+                            else:
+                                print(f"Skipping buy: position limit reached ({current_positions} positions, {pending_buys} pending buys)")
                         else:
                             print("No market making opportunity")
                     else:
@@ -549,11 +593,13 @@ class OrderTracker:
         self.filled_orders = []
         self.total_orders_placed = 0
         self.total_orders_filled = 0
+        self.order_history = []  # Track all orders for debugging
     
     def add_pending_order(self, order):
         if order is not None:
             self.pending_orders.append(order)
             self.total_orders_placed += 1
+            self.order_history.append((datetime.datetime.now(), "PLACED", order))
             print(f"Added pending order: {order}")
             print(f"Total orders placed: {self.total_orders_placed}, Filled: {self.total_orders_filled}, Pending: {len(self.pending_orders)}")
     
@@ -565,39 +611,52 @@ class OrderTracker:
         try:
             order_driver.refresh()
             time.sleep(2)  
-            
-            orders_table = order_driver.find_element(By.CSS_SELECTOR, "[class^='tableBox'][class*='fullWidth']")
-            order_rows = orders_table.find_elements(By.CSS_SELECTOR, "[class^='row'][class*='interactive']")
-  
+            orders_table = order_driver.find_element(By.CSS_SELECTOR, "[class^='bottomSection'][class*='topLevelSection']")
+            order_rows = orders_table.find_elements(By.TAG_NAME, 'a')
+            order_rows = order_rows[1::]
             print(f"Found {len(order_rows)} order entries")
             
-            for pending_order in list(self.pending_orders):
-                order_filled = False
+            pending_by_label = {}
+            for order in self.pending_orders:
+                label_parts = order.label.split("°")
+                temp_start = label_parts[0].strip()
+                if temp_start not in pending_by_label:
+                    pending_by_label[temp_start] = []
+                pending_by_label[temp_start].append(order)
+            
+            for row in order_rows:
+                try:
+                    temp_container = row.find_elements(By.TAG_NAME, 'td')[0].text
+                    temp_text = temp_container.find_elements(By.TAG_NAME, 'span')[1].text
+                    # status_text = row.find_elements(By.TAG_NAME, 'span')[0].text
+                    print(f"Row: {temp_text}")
+                    # print(temp_start)
+                    # Find all potential matching orders
+                    for label_prefix, orders in pending_by_label.items():
+                        if label_prefix in temp_text:
+                            for order in orders:
+                                # if ((order.buy_sell == 0 and "Order Filled" in status_text) or
+                                #    (order.buy_sell == 1 and "Trade Completed" in status_text)):
+                                    
+                                if order in self.pending_orders:  # Ensure we haven't processed it already
+                                    filled_orders.append(order)
+                                    self.pending_orders.remove(order)
+                                    order.mark_as_filled()
+                                    self.filled_orders.append(order)
+                                    self.total_orders_filled += 1
+                                    self.order_history.append((datetime.datetime.now(), "FILLED", order))
+                                    print(f"Order confirmed filled: {order}")
                 
-                for row in order_rows:
-                    try:
-                        label_parts = pending_order.label.split("°")
-                        temp_start = label_parts[0].strip()
-                        # temp_end = label_parts[1].replace("to", "").strip()
-
-                        market_text = row.find_elements(By.TAG_NAME, 'a')[0].text
-                        status_text = row.find_elements(By.TAG_NAME, 'span')[0].text
-                        
-                        print(temp_start, market_text, status_text)
-
-                        if temp_start in market_text:
-                            if (("Order Filled" in status_text and pending_order.buy_sell == 0) or
-                                ("Trade Completed" in status_text and pending_order.buy_sell == 1)):
-                                order_filled = True
-                                filled_orders.append(pending_order)
-                                self.pending_orders.remove(pending_order)
-                                pending_order.mark_as_filled()
-                                self.filled_orders.append(pending_order)
-                                self.total_orders_filled += 1
-                                print(f"Order confirmed filled: {pending_order}")
-                                break
-                    except Exception as e:
-                        print(f"Error processing order row: {e}")
+                except Exception as e:
+                    print(f"Error processing order row: {e}")
+            
+            # Check for stale pending orders (older than 2 minutes)
+            # stale_time = datetime.datetime.now() - datetime.timedelta(minutes=2)
+            # stale_orders = [order for order in self.pending_orders if order.timestamp < stale_time]
+            # for stale_order in stale_orders:
+            #     print(f"Removing stale pending order: {stale_order}")
+            #     self.pending_orders.remove(stale_order)
+            #     self.order_history.append((datetime.datetime.now(), "STALE", stale_order))
             
             print(f"Total orders placed: {self.total_orders_placed}, Filled: {self.total_orders_filled}, Pending: {len(self.pending_orders)}")
             return filled_orders
@@ -605,7 +664,7 @@ class OrderTracker:
         except Exception as e:
             print(f"Error checking order fills: {e}")
             return []
-
+        
 def login(driver):
     config = configparser.ConfigParser()
     try:
