@@ -345,7 +345,7 @@ def market_maker(logged_driver, order_driver, market_url):
     
     driver = webdriver.Firefox()
     driver.get(market_url)
-    time.sleep(5)
+    # time.sleep(5)
     
     print("\n----- TRADING SIMULATION -----")
     print(f"Strategy: Buy up to {simulator.max_open_positions} contracts where spread ≥ 3¢")
@@ -356,7 +356,9 @@ def market_maker(logged_driver, order_driver, market_url):
     
     try:
         # tile_group = driver.find_element(By.CLASS_NAME, 'tileGroup-0-1-124')
-        tile_group = driver.find_element(By.CSS_SELECTOR, "[class^='tileGroup']")
+        tile_group = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "[class^='tileGroup']"))
+        )
         while True:
             simulator.process_filled_orders(order_driver)
 
@@ -498,7 +500,7 @@ def market_maker(logged_driver, order_driver, market_url):
                 assert "No results found." not in driver.page_source
             
             simulator.check_for_sells(markets_data)
-            time.sleep(3)
+            # time.sleep(3)
             
             if (datetime.datetime.now() - start_time).total_seconds() > 1800:
                 print("\nReached 30 minute limit")
@@ -609,9 +611,9 @@ class OrderTracker:
         
         try:
             order_driver.refresh()
-            time.sleep(2)  
-            
-            orders_table = order_driver.find_element(By.CSS_SELECTOR, "[class^='tableBox'][class*='fullWidth']")
+            # time.sleep(2)  
+
+            orders_table = WebDriverWait(order_driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "[class^='tableBox'][class*='fullWidth'")))
             order_rows = orders_table.find_elements(By.CSS_SELECTOR, "[class^='row'][class*='interactive']")
   
             print(f"Found {len(order_rows)} order entries")
@@ -665,7 +667,7 @@ def login(driver):
     
     driver.get("https://kalshi.com/sign-in")
     print("Signing in...")
-    time.sleep(5)
+    # time.sleep(5)
     
     try:
         username_field = WebDriverWait(driver, 10).until(
@@ -685,10 +687,8 @@ def login(driver):
                 By.CSS_SELECTOR, "button[class^='button'][class*='fullWidth'][class*='medium'][class*='brand'][type='submit']"
             ))
         )
-
         driver.execute_script("arguments[0].click();", login_button)
-        
-        time.sleep(3)
+        time.sleep(1)
         current_url = driver.current_url
         
         if "two-factor-code" in current_url:
@@ -719,7 +719,7 @@ def login(driver):
         driver.quit()
 
     driver.get(market_url)
-    time.sleep(2)
+    # time.sleep(2)
     return market_url
 
 def setup_orders_window(driver):
@@ -731,7 +731,7 @@ def setup_orders_window(driver):
         # orders_tab = container.find_elements(By.TAG_NAME, 'button')[4]
         # driver.execute_script("arguments[0].click();", orders_tab)
         print("Created order monitoring tab")
-        time.sleep(3) 
+        # time.sleep(3) 
         
     except Exception as e:
         print(f"Error creating orders tab: {e}")
@@ -740,14 +740,13 @@ def setup_orders_window(driver):
 if __name__ == "__main__":
     driver = webdriver.Firefox()
     market_url = login(driver)
-    time.sleep(2)
-    dollars_button = driver.find_elements(By.CSS_SELECTOR, "[class^='interactiveHeader']")[0]
+    # time.sleep(1)
+    dollars_button = WebDriverWait(driver, 5).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "[class^='interactiveHeader']")))[0]
     driver.execute_script("arguments[0].click();", dollars_button)
     container = driver.find_element(By.CSS_SELECTOR, '[style="display: flex; min-width: 200px; padding: 4px 16px;"]')
     limit_button = container.find_elements(By.CSS_SELECTOR, "[class^='row'][class*='interactive']")[2]
     driver.execute_script("arguments[0].click();", limit_button)
     order_driver = webdriver.Firefox()
     setup_orders_window(order_driver)
-    time.sleep(5)
-
+    # time.sleep(1)
     market_maker(driver, order_driver, market_url)
