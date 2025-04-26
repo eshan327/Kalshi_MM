@@ -575,8 +575,7 @@ def place_order(logged_driver, label, yes_no, buy_sell, price, qty, wait_time=5)
         review_button = review_container.find_elements(By.TAG_NAME, 'button')[0]
         logged_driver.execute_script("arguments[0].click();", review_button) 
     
-        confirm_container = logged_driver.find_element(By.CLASS_NAME, 'flex.gap-2')
-        confirm_button = confirm_container.find_elements(By.TAG_NAME, 'button')[1]
+        confirm_button = driver.find_elements(By.CSS_SELECTOR, '[class*="button-"][class*="fullWidth-"][class*="medium-"]')[0]
         logged_driver.execute_script("arguments[0].click();", confirm_button)
         
         print(f"Order placed on Kalshi: {order}")
@@ -611,52 +610,39 @@ class OrderTracker:
         try:
             order_driver.refresh()
             time.sleep(2)  
-            orders_table = order_driver.find_element(By.CSS_SELECTOR, "[class^='bottomSection'][class*='topLevelSection']")
-            order_rows = orders_table.find_elements(By.TAG_NAME, 'a')
-            order_rows = order_rows[1::]
+            
+            orders_table = order_driver.find_element(By.CSS_SELECTOR, "[class^='tableBox'][class*='fullWidth']")
+            order_rows = orders_table.find_elements(By.CSS_SELECTOR, "[class^='row'][class*='interactive']")
+  
             print(f"Found {len(order_rows)} order entries")
             
-            pending_by_label = {}
-            for order in self.pending_orders:
-                label_parts = order.label.split("°")
-                temp_start = label_parts[0].strip()
-                if temp_start not in pending_by_label:
-                    pending_by_label[temp_start] = []
-                pending_by_label[temp_start].append(order)
-            
-            for row in order_rows:
-                try:
-                    temp_container = row.find_elements(By.TAG_NAME, 'td')[0].text
-                    temp_text = temp_container.find_elements(By.TAG_NAME, 'span')[1].text
-                    # status_text = row.find_elements(By.TAG_NAME, 'span')[0].text
-                    print(f"Row: {temp_text}")
-                    # print(temp_start)
-                    # Find all potential matching orders
-                    for label_prefix, orders in pending_by_label.items():
-                        if label_prefix in temp_text:
-                            for order in orders:
-                                # if ((order.buy_sell == 0 and "Order Filled" in status_text) or
-                                #    (order.buy_sell == 1 and "Trade Completed" in status_text)):
-                                    
-                                if order in self.pending_orders:  # Ensure we haven't processed it already
-                                    filled_orders.append(order)
-                                    self.pending_orders.remove(order)
-                                    order.mark_as_filled()
-                                    self.filled_orders.append(order)
-                                    self.total_orders_filled += 1
-                                    self.order_history.append((datetime.datetime.now(), "FILLED", order))
-                                    print(f"Order confirmed filled: {order}")
+            for pending_order in list(self.pending_orders):
+                order_filled = False
                 
-                except Exception as e:
-                    print(f"Error processing order row: {e}")
-            
-            # Check for stale pending orders (older than 2 minutes)
-            # stale_time = datetime.datetime.now() - datetime.timedelta(minutes=2)
-            # stale_orders = [order for order in self.pending_orders if order.timestamp < stale_time]
-            # for stale_order in stale_orders:
-            #     print(f"Removing stale pending order: {stale_order}")
-            #     self.pending_orders.remove(stale_order)
-            #     self.order_history.append((datetime.datetime.now(), "STALE", stale_order))
+                for row in order_rows:
+                    try:
+                        label_parts = pending_order.label.split("°")
+                        temp_start = label_parts[0].strip()
+                        # temp_end = label_parts[1].replace("to", "").strip()
+
+                        market_text = row.find_elements(By.TAG_NAME, 'a')[0].text
+                        status_text = row.find_elements(By.TAG_NAME, 'span')[0].text
+                        
+                        print(temp_start, market_text, status_text)
+
+                        if temp_start in market_text:
+                            if (("Order Filled" in status_text and pending_order.buy_sell == 0) or
+                                ("Trade Completed" in status_text and pending_order.buy_sell == 1)):
+                                order_filled = True
+                                filled_orders.append(pending_order)
+                                self.pending_orders.remove(pending_order)
+                                pending_order.mark_as_filled()
+                                self.filled_orders.append(pending_order)
+                                self.total_orders_filled += 1
+                                print(f"Order confirmed filled: {pending_order}")
+                                break
+                    except Exception as e:
+                        print(f"Error processing order row: {e}")
             
             print(f"Total orders placed: {self.total_orders_placed}, Filled: {self.total_orders_filled}, Pending: {len(self.pending_orders)}")
             return filled_orders
