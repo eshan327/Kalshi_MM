@@ -21,7 +21,7 @@ class TradingSimulator:
         self.trade_history = []  # [(timestamp, balance, action, profit)]
         self.balance_history = [(datetime.datetime.now(), initial_balance)]
         self.next_sell_time = self.generate_next_sell_time()
-        self.max_open_positions = 2
+        self.max_open_positions = 1
         self.sell_on_next_iteration = False
         self.forced_trade_indices = []
         self.order_tracker = OrderTracker()
@@ -45,9 +45,9 @@ class TradingSimulator:
             self.order_tracker.add_pending_order(order)
         return order
     
-    def process_filled_orders(self, order_driver):
+    def process_filled_orders(self, logged_driver):
         """Check for filled orders and update simulator state"""
-        filled_orders = self.order_tracker.check_fills(order_driver)
+        filled_orders = self.order_tracker.check_fills(logged_driver)
         for filled_order in filled_orders:
             # Generate a unique contract ID based on order details
             contract_id = f"kalshi_{filled_order.label.replace(' ', '_')}_{int(time.time())}"
@@ -320,7 +320,7 @@ class TradingSimulator:
         
         print("---------------------------\n")
 
-def market_maker(logged_driver, order_driver, market_url):
+def market_maker(logged_driver, market_url):
     
     simulator = TradingSimulator(initial_balance=1000)
     markets_data = []
@@ -360,7 +360,7 @@ def market_maker(logged_driver, order_driver, market_url):
             EC.presence_of_element_located((By.CSS_SELECTOR, "[class^='tileGroup']"))
         )
         while True:
-            simulator.process_filled_orders(order_driver)
+            simulator.process_filled_orders(logged_driver)
 
             # Get current position count after processing fills
             current_positions = simulator.get_total_open_contracts()
@@ -604,54 +604,69 @@ class OrderTracker:
             print(f"Added pending order: {order}")
             print(f"Total orders placed: {self.total_orders_placed}, Filled: {self.total_orders_filled}, Pending: {len(self.pending_orders)}")
     
-    def check_fills(self, order_driver):
+    def check_fills(self, logged_driver):
         """Check which orders have been filled using orders tab"""
         print("Checking for order fills...")
         filled_orders = []
         
-        try:
-            order_driver.refresh()
-            # time.sleep(2)  
-
-            orders_table = WebDriverWait(order_driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "[class^='tableBox'][class*='fullWidth'")))
-            order_rows = orders_table.find_elements(By.CSS_SELECTOR, "[class^='row'][class*='interactive']")
-  
-            print(f"Found {len(order_rows)} order entries")
-            
-            for pending_order in list(self.pending_orders):
-                order_filled = False
-                
-                for row in order_rows:
-                    try:
-                        label_parts = pending_order.label.split("°")
-                        temp_start = label_parts[0].strip()
-                        # temp_end = label_parts[1].replace("to", "").strip()
-
-                        market_text = row.find_elements(By.TAG_NAME, 'a')[0].text
-                        status_text = row.find_elements(By.TAG_NAME, 'span')[0].text
-                        
-                        print(temp_start, market_text, status_text)
-
-                        if temp_start in market_text:
-                            if (("Order Filled" in status_text and pending_order.buy_sell == 0) or
-                                ("Trade Completed" in status_text and pending_order.buy_sell == 1)):
-                                order_filled = True
-                                filled_orders.append(pending_order)
+        tile_group = WebDriverWait(logged_driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "[class^='tileGroup']"))
+        )
+        
+        markets = tile_group.find_elements(By.XPATH, "*")
+        markets = markets[0:3]
+        
+        for market in markets:
+            temp_label = market.find_element(By.CLASS_NAME, 'flex').get_attribute("innerHTML") 
+            order_label = market.find_elements(By.TAG_NAME, 'span')[1].get_attribute("innerHTML") 
+            if "Yes ·" in order_label or "No ·" in order_label:
+                parts = order_label.split("·")
+                if len(parts) > 1:
+                    number_part = parts[1].strip().split(" ")[0]
+                    current_owned = int(number_part)
+                    
+                    print(f"Current owned: {current_owned} for {temp_label}")
+                    for pending_order in self.pending_orders[:]: 
+                        if pending_order.label == temp_label:
+                            if not hasattr(pending_order, 'previous_owned'):
+                                pending_order.previous_owned = 0
+                            if current_owned != pending_order.previous_owned:
+                                if current_owned > pending_order.previous_owned and pending_order.buy_sell == 0:
+                                    self.pending_orders.remove(pending_order)
+                                    pending_order.mark_as_filled()
+                                    self.filled_orders.append(pending_order)
+                                    self.total_orders_filled += 1
+                                    print(f"Buy order confirmed filled: {pending_order}")
+                                    filled_orders.append(pending_order)
+                                elif current_owned < pending_order.previous_owned and pending_order.is_buy == 1:
+                                    self.pending_orders.remove(pending_order)
+                                    pending_order.mark_as_filled()
+                                    self.filled_orders.append(pending_order)
+                                    self.total_orders_filled += 1
+                                    print(f"Sell order confirmed filled: {pending_order}")
+                                    filled_orders.append(pending_order)
+                                
+                            pending_order.previous_owned = current_owned
+            else:
+                current_owned = 0
+                temp_label = market.find_element(By.CLASS_NAME, 'flex').get_attribute("innerHTML") 
+                print(f"Current owned: {current_owned} for {temp_label}")
+                for pending_order in self.pending_orders[:]:
+                    if pending_order.label == temp_label:
+                        if not hasattr(pending_order, 'previous_owned'):
+                            pending_order.previous_owned = 0
+                        if current_owned != pending_order.previous_owned:
+                            if pending_order.previous_owned > 0 and not pending_order.is_buy:
                                 self.pending_orders.remove(pending_order)
                                 pending_order.mark_as_filled()
                                 self.filled_orders.append(pending_order)
                                 self.total_orders_filled += 1
-                                print(f"Order confirmed filled: {pending_order}")
-                                break
-                    except Exception as e:
-                        print(f"Error processing order row: {e}")
-            
-            print(f"Total orders placed: {self.total_orders_placed}, Filled: {self.total_orders_filled}, Pending: {len(self.pending_orders)}")
-            return filled_orders
-            
-        except Exception as e:
-            print(f"Error checking order fills: {e}")
-            return []
+                                print(f"Sell order confirmed filled: {pending_order}")
+                                filled_orders.append(pending_order)
+                        
+                        pending_order.previous_owned = current_owned
+        
+        return filled_orders
         
 def login(driver):
     config = configparser.ConfigParser()
@@ -746,7 +761,7 @@ if __name__ == "__main__":
     container = driver.find_element(By.CSS_SELECTOR, '[style="display: flex; min-width: 200px; padding: 4px 16px;"]')
     limit_button = container.find_elements(By.CSS_SELECTOR, "[class^='row'][class*='interactive']")[2]
     driver.execute_script("arguments[0].click();", limit_button)
-    order_driver = webdriver.Firefox()
-    setup_orders_window(order_driver)
+    # order_driver = webdriver.Firefox()
+    # setup_orders_window(order_driver)
     # time.sleep(1)
-    market_maker(driver, order_driver, market_url)
+    market_maker(driver, market_url)
