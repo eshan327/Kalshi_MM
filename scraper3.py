@@ -21,7 +21,7 @@ class TradingSimulator:
         self.trade_history = []  # [(timestamp, balance, action, profit)]
         self.balance_history = [(datetime.datetime.now(), initial_balance)]
         self.next_sell_time = self.generate_next_sell_time()
-        self.max_open_positions = 1
+        self.max_open_positions = 3
         self.sell_on_next_iteration = False
         self.forced_trade_indices = []
         self.order_tracker = OrderTracker()
@@ -548,43 +548,56 @@ class Order:
         self.filled = True
         self.fill_timestamp = datetime.datetime.now()
         
-def place_order(logged_driver, label, yes_no, buy_sell, price, qty, wait_time=5):
+def place_order(order_driver, label, yes_no, buy_sell, price, qty, wait_time=5):
     order = Order(label, yes_no, buy_sell, price, qty)
     
     try:
-        temp_group = logged_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
-        yes_button = temp_group.find_elements(By.CSS_SELECTOR, "[class^='pill']")[0]
-        logged_driver.execute_script("arguments[0].click();", yes_button)
-        
-        yes_no_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; justify-content: space-between; align-items: center; flex: 1 0 0%;"]')
-        yes_no_button = yes_no_container.find_elements(By.TAG_NAME, 'button')[yes_no]  
-        logged_driver.execute_script("arguments[0].click();", yes_no_button)         
-        
-        buy_sell_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; justify-content: space-between; align-items: center; box-sizing: border-box; border-bottom: 1px solid var(--kalshi-palette-fill-x50, rgba(0, 0, 0, 0.05));"]')
-        buy_sell_button = buy_sell_container.find_elements(By.CSS_SELECTOR, '[style="display: flex; min-width: 32px; justify-content: center; align-items: center;"]')[buy_sell]
-        logged_driver.execute_script("arguments[0].click();", buy_sell_button)
-        
-        input_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="border-radius: 8px; border: 1px solid var(--kalshi-palette-fill-x50, rgba(0, 0, 0, 0.05));"]')  
+        # print("Finding market group based on label...")
+        temp_group = order_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
+        # print("Market group found.")
+        yes_no_button = temp_group.find_elements(By.CSS_SELECTOR, "[class^='pill']")[yes_no]
+        order_driver.execute_script("arguments[0].click();", yes_no_button)
+
+        # print("Locating Buy/Sell container...")
+        if buy_sell == 0:  
+            buy_sell_button = order_driver.find_element(By.XPATH, '//button[.//span[text()="Buy"]]')
+        else:
+            buy_sell_button = order_driver.find_element(By.XPATH, '//button[.//span[text()="Sell"]]')
+        order_driver.execute_script("arguments[0].click();", buy_sell_button)
+        # print("Buy/Sell option selected.")
+
+        # print("Locating input container...")
+        contracts_label = order_driver.find_element(By.XPATH, '//span[contains(text(), "Contracts")]')
+        input_container = contracts_label.find_element(By.XPATH, './ancestor::div[3]')
         contract_input = input_container.find_elements(By.TAG_NAME, 'input')[0]
         contract_input.clear()
         contract_input.send_keys(qty)
-        
+        # print("Quantity input entered.")
+
         limit_input = input_container.find_elements(By.TAG_NAME, 'input')[1]
         limit_input.clear()
         limit_input.send_keys(price)
-        
-        review_container = logged_driver.find_element(By.CSS_SELECTOR, '[style="display: flex; flex-direction: column; margin-top: 8px;"]')                         
-        review_button = review_container.find_elements(By.TAG_NAME, 'button')[0]
-        logged_driver.execute_script("arguments[0].click();", review_button) 
-    
-        confirm_button = driver.find_elements(By.CSS_SELECTOR, '[class*="button-"][class*="fullWidth-"][class*="medium-"]')[0]
-        logged_driver.execute_script("arguments[0].click();", confirm_button)
-        
+        # print("Price input entered.")
+
+        # print("Clicking review order button...")
+        review_button = input_container.find_elements(By.TAG_NAME, 'button')[0]
+        order_driver.execute_script("arguments[0].click();", review_button)
+        # print("Review order clicked.")
+
+        print("Clicking confirm button...")
+        submit_label = order_driver.find_element(By.XPATH, '//span[contains(text(), "Submit")]')
+        submit_container = submit_label.find_element(By.XPATH, './ancestor::div[1]')
+        submit_button = submit_container.find_elements(By.TAG_NAME, 'button')[0]
+        order_driver.execute_script("arguments[0].click();", submit_button)
+        print("Order confirmed.")
+
         print(f"Order placed on Kalshi: {order}")
         time.sleep(wait_time)
         return order
-        
+
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"Failed to place order on Kalshi: {e}")
         return None
     
@@ -677,14 +690,15 @@ def login(driver):
         max_position = int(config['Trading']['max_position'])
         max_capital = int(config['Trading']['max_capital'])
         market_url = config['Trading']['url']
-    except:
-        print("Error loading config.ini.")
-    
-    driver.get("https://kalshi.com/sign-in")
+    except Exception as e:
+        print(f"Error loading config.ini: {e}")
+        raise
+
     print("Signing in...")
-    # time.sleep(5)
+    driver.get("https://kalshi.com/sign-in")
     
     try:
+        # Input username and password
         username_field = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='email']"))
         )
@@ -697,60 +711,69 @@ def login(driver):
         password_field.clear()
         password_field.send_keys(password)
         
+        # Click login button
         login_button = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((
                 By.CSS_SELECTOR, "button[class^='button'][class*='fullWidth'][class*='medium'][class*='brand'][type='submit']"
             ))
         )
         driver.execute_script("arguments[0].click();", login_button)
-        time.sleep(1)
-        current_url = driver.current_url
         
-        if "two-factor-code" in current_url:
-            print("2FA required. Input the code.")
+        # 2FA
+        WebDriverWait(driver, 10).until(
+            EC.any_of(
+                EC.url_contains("two-factor-code"),
+                EC.url_contains("/markets"),
+                EC.url_contains("kalshi.com/")
+            )
+        )
+        
+        time.sleep(1)
+
+        if "two-factor-code" in driver.current_url:
+
+            print("2FA required.")
             
-            max_wait = 120 
+            max_wait = 120  # 2 minutes
             start_time = time.time()
             
             while "two-factor-code" in driver.current_url:
                 if time.time() - start_time > max_wait:
                     print("Timed out waiting for 2FA")
                     driver.quit()
+                    raise TimeoutError("2FA verification timed out")
                 time.sleep(2)
-                
+            
             print("2FA complete.")
         
-        WebDriverWait(driver, 30).until(
-            EC.any_of(
-                EC.url_contains("/markets"),
-                EC.url_contains("kalshi.com/"),
-                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'userMenuContainer')]"))
+        # Wait for successful login - homepage or markets page
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.any_of(
+                    EC.url_contains("/markets"),
+                    EC.url_contains("kalshi.com/"),
+                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'userMenuContainer')]"))
+                )
             )
+            print("Login successful! Verified user menu is present.")
+        except:
+            print("Login might not be complete.")
+        
+        
+        print(f"Navigating to market: {market_url}")
+        driver.get(market_url)
+        
+        # Wait for market page to load
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "[class^='tileGroup']"))
         )
-        print("Login successful")
+        print("Market page loaded.")
+        
+        return market_url
         
     except Exception as e:
         print(f"Login failed: {e}")
-        driver.quit()
-
-    driver.get(market_url)
-    # time.sleep(2)
-    return market_url
-
-def setup_orders_window(driver):
-    """Create a new tab in the existing driver to monitor orders"""
-    try:
-        login(driver)
-        driver.get("https://kalshi.com/account/activity")
-        # container = driver.find_element(By.CLASS_NAME, 'pills-0-1-156')
-        # orders_tab = container.find_elements(By.TAG_NAME, 'button')[4]
-        # driver.execute_script("arguments[0].click();", orders_tab)
-        print("Created order monitoring tab")
-        # time.sleep(3) 
-        
-    except Exception as e:
-        print(f"Error creating orders tab: {e}")
-        orders_window = None
+        raise
 
 if __name__ == "__main__":
     driver = webdriver.Firefox()
@@ -765,3 +788,15 @@ if __name__ == "__main__":
     # setup_orders_window(order_driver)
     # time.sleep(1)
     market_maker(driver, market_url)
+
+    order_driver = webdriver.Firefox()
+    market_url = login(order_driver)
+    time.sleep(1)
+    dollars_button = WebDriverWait(order_driver, 5).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "[class^='interactiveHeader']")))[0]
+    order_driver.execute_script("arguments[0].click();", dollars_button)
+    limit_span = order_driver.find_element(By.XPATH, '//span[contains(text(), "Limit order")]')
+    container = limit_span.find_element(By.XPATH, './ancestor::div[5]')
+    limit_button = container.find_elements(By.CSS_SELECTOR, "[class^='row'][class*='interactive']")[2]
+    order_driver.execute_script("arguments[0].click();", limit_button)
+    time.sleep(2)
+    market_maker(order_driver, market_url)
