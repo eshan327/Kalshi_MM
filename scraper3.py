@@ -698,7 +698,6 @@ def login(driver):
     driver.get("https://kalshi.com/sign-in")
     
     try:
-        # Input username and password
         username_field = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='email']"))
         )
@@ -711,69 +710,60 @@ def login(driver):
         password_field.clear()
         password_field.send_keys(password)
         
-        # Click login button
         login_button = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((
                 By.CSS_SELECTOR, "button[class^='button'][class*='fullWidth'][class*='medium'][class*='brand'][type='submit']"
             ))
         )
         driver.execute_script("arguments[0].click();", login_button)
-        
-        # 2FA
-        WebDriverWait(driver, 10).until(
-            EC.any_of(
-                EC.url_contains("two-factor-code"),
-                EC.url_contains("/markets"),
-                EC.url_contains("kalshi.com/")
-            )
-        )
-        
         time.sleep(1)
-
-        if "two-factor-code" in driver.current_url:
-
-            print("2FA required.")
+        current_url = driver.current_url
+        
+        if "two-factor-code" in current_url:
+            print("2FA required. Input the code.")
             
-            max_wait = 120  # 2 minutes
+            max_wait = 120 
             start_time = time.time()
             
             while "two-factor-code" in driver.current_url:
                 if time.time() - start_time > max_wait:
                     print("Timed out waiting for 2FA")
                     driver.quit()
-                    raise TimeoutError("2FA verification timed out")
                 time.sleep(2)
-            
+                
             print("2FA complete.")
         
-        # Wait for successful login - homepage or markets page
-        try:
-            WebDriverWait(driver, 10).until(
-                EC.any_of(
-                    EC.url_contains("/markets"),
-                    EC.url_contains("kalshi.com/"),
-                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'userMenuContainer')]"))
-                )
+        WebDriverWait(driver, 30).until(
+            EC.any_of(
+                EC.url_contains("/markets"),
+                EC.url_contains("kalshi.com/"),
+                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'userMenuContainer')]"))
             )
-            print("Login successful! Verified user menu is present.")
-        except:
-            print("Login might not be complete.")
-        
-        
-        print(f"Navigating to market: {market_url}")
-        driver.get(market_url)
-        
-        # Wait for market page to load
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "[class^='tileGroup']"))
         )
-        print("Market page loaded.")
-        
-        return market_url
+        print("Login successful")
         
     except Exception as e:
         print(f"Login failed: {e}")
-        raise
+        driver.quit()
+
+    driver.get(market_url)
+    # time.sleep(2)
+    return market_url
+
+def setup_orders_window(driver):
+    """Create a new tab in the existing driver to monitor orders"""
+    try:
+        login(driver)
+        driver.get("https://kalshi.com/account/activity")
+        # container = driver.find_element(By.CLASS_NAME, 'pills-0-1-156')
+        # orders_tab = container.find_elements(By.TAG_NAME, 'button')[4]
+        # driver.execute_script("arguments[0].click();", orders_tab)
+        print("Created order monitoring tab")
+        # time.sleep(3) 
+        
+    except Exception as e:
+        print(f"Error creating orders tab: {e}")
+        orders_window = None
 
 if __name__ == "__main__":
     driver = webdriver.Firefox()
