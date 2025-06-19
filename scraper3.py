@@ -21,7 +21,7 @@ class TradingSimulator:
         self.trade_history = []  # [(timestamp, balance, action, profit)]
         self.balance_history = [(datetime.datetime.now(), initial_balance)]
         self.next_sell_time = self.generate_next_sell_time()
-        self.max_open_positions = 3
+        self.max_open_positions = 1
         self.sell_on_next_iteration = False
         self.forced_trade_indices = []
         self.order_tracker = OrderTracker()
@@ -555,7 +555,10 @@ def place_order(order_driver, label, yes_no, buy_sell, price, qty, wait_time=5):
         # print("Finding market group based on label...")
         temp_group = order_driver.find_element(By.XPATH, f'//*[contains(text(), "{label}")]/ancestor::*[5]')
         # print("Market group found.")
-        yes_no_button = temp_group.find_elements(By.CSS_SELECTOR, "[class^='pill']")[yes_no]
+        if yes_no == 0:  
+            yes_no_button = temp_group.find_element(By.XPATH, '//button[.//span[text()="Yes"]]')
+        else:
+            yes_no_button = temp_group.find_element(By.XPATH, '//button[.//span[text()="No"]]')
         order_driver.execute_script("arguments[0].click();", yes_no_button)
 
         # print("Locating Buy/Sell container...")
@@ -632,10 +635,10 @@ class OrderTracker:
         for market in markets:
             temp_label = market.find_element(By.CLASS_NAME, 'flex').get_attribute("innerHTML") 
             order_label = market.find_elements(By.TAG_NAME, 'span')[1].get_attribute("innerHTML") 
-            if "Yes ·" in order_label or "No ·" in order_label:
-                parts = order_label.split("·")
+            if "Yes" in order_label or "No" in order_label:
+                parts = order_label.split()
                 if len(parts) > 1:
-                    number_part = parts[1].strip().split(" ")[0]
+                    number_part = parts[0]
                     current_owned = int(number_part)
                     
                     print(f"Current owned: {current_owned} for {temp_label}")
@@ -710,11 +713,11 @@ def login(driver):
         password_field.clear()
         password_field.send_keys(password)
         
-        login_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((
-                By.CSS_SELECTOR, "button[class^='button'][class*='fullWidth'][class*='medium'][class*='brand'][type='submit']"
-            ))
+        password_label = WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located((By.XPATH, '//span[contains(text(), "Forgot password?")]'))
         )
+        login_div = password_label.find_element(By.XPATH, './ancestor::div[1]')
+        login_button = login_div.find_elements(By.TAG_NAME, 'button')[0]
         driver.execute_script("arguments[0].click();", login_button)
         time.sleep(1)
         current_url = driver.current_url
