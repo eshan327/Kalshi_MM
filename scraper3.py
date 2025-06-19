@@ -26,7 +26,7 @@ class TradingSimulator:
         self.forced_trade_indices = []
         self.order_tracker = OrderTracker()
 
-         # New methods to handle order tracking
+        # New methods to handle order tracking
     
     def place_order_on_kalshi(self, logged_driver, label, yes_no, buy_sell, price, qty):
         """Place an order on Kalshi but don't update simulator yet"""
@@ -361,6 +361,12 @@ def market_maker(logged_driver, market_url):
         )
         while True:
             simulator.process_filled_orders(logged_driver)
+            simulator.order_tracker.update_pending_orders_ticker(markets_data)  # Update pending orders with latest prices
+
+            for order in simulator.order_tracker.pending_orders:
+                print(f"Unfilled Order: {order}, Bid: {getattr(order, 'latest_bid', 'N/A')}, Ask: {getattr(order, 'latest_ask', 'N/A')}")
+
+
 
             # Get current position count after processing fills
             current_positions = simulator.get_total_open_contracts()
@@ -683,6 +689,20 @@ class OrderTracker:
                         pending_order.previous_owned = current_owned
         
         return filled_orders
+    
+    def update_pending_orders_ticker(self, market_data):
+        """Update pending orders with latest bid/ask prices from market data"""
+        for order in self.pending_orders:
+            for market in market_data:
+                if market.get("id") and order.label in market.get("id") or order.label in market.get("label", ""):
+                    if order.yes_no == 0:
+                        order.latest_bid = market.get("yes_bid_price")
+                        order.latest_ask = market.get("yes_ask_price")
+                    elif order.yes_no == 1:
+                        order.latest_bid = market.get("no_bid_price")
+                        order.latest_ask = market.get("no_ask_price")
+                    break
+
         
 def login(driver):
     config = configparser.ConfigParser()
