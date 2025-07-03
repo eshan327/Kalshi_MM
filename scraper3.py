@@ -43,7 +43,7 @@ class TradingSimulator:
         order = place_order(logged_driver, label, yes_no, buy_sell, price, qty)
         if order:
             self.order_tracker.add_pending_order(order)
-        return order
+        return 0
     
     def process_filled_orders(self, logged_driver):
         """Check for filled orders and update simulator state"""
@@ -389,12 +389,16 @@ def market_maker(logged_driver, market_url):
                     contract_id = f"temp_{len(markets_data)}"
                     market_data = {"id": contract_id}
                     
-                    label = market.find_element(By.CLASS_NAME, 'flex').get_attribute("innerHTML")
+                    label_container = market.find_element(By.XPATH, "//div[contains(text(), 'to') or contains(text(), 'or')]")
+                    label = label_container.get_attribute("innerHTML")
+                    
+                    print(f"\nProcessing market: {label}")
                     market.click()
     
                     # yes prices
-                    headingContainer = market.find_element(By.CSS_SELECTOR, "[class^='headingContainer']")
-                    yes_button = headingContainer.find_elements(By.TAG_NAME, 'button')[0]
+                    # headingContainer = label_container.find_element(By.XPATH, './ancestor::div[3]').get_attribute("innerHTML")
+                    # print(f"Heading container: {headingContainer}")
+                    yes_button = market.find_elements(By.TAG_NAME, 'button')[0]
                     driver.execute_script("arguments[0].click();", yes_button)
     
                     yes_orderbook = market.find_element(By.CSS_SELECTOR, "[class^='orderbookContent']")
@@ -445,8 +449,8 @@ def market_maker(logged_driver, market_url):
                         print("Contract: Yes - Insufficient data")
     
                     # no prices
-                    headingContainer = market.find_element(By.CSS_SELECTOR, "[class^='headingContainer']")
-                    no_button = headingContainer.find_elements(By.TAG_NAME, 'button')[1]
+                    # headingContainer = market.find_element(By.CSS_SELECTOR, "[class^='headingContainer']")
+                    no_button = market.find_elements(By.TAG_NAME, 'button')[1]
                     driver.execute_script("arguments[0].click();", no_button)
     
                     no_orderbook = market.find_element(By.CSS_SELECTOR, "[class^='orderbookContent']")
@@ -639,7 +643,8 @@ class OrderTracker:
         markets = markets[0:3]
         
         for market in markets:
-            temp_label = market.find_element(By.CLASS_NAME, 'flex').get_attribute("innerHTML") 
+            # Select the element that contains the first text node
+            temp_label = market.find_element(By.XPATH, "//div[contains(text(), 'to') or contains(text(), 'or')]").get_attribute("innerHTML")
             order_label = market.find_elements(By.TAG_NAME, 'span')[1].get_attribute("innerHTML") 
             if "Yes" in order_label or "No" in order_label:
                 parts = order_label.split()
@@ -671,7 +676,7 @@ class OrderTracker:
                             pending_order.previous_owned = current_owned
             else:
                 current_owned = 0
-                temp_label = market.find_element(By.CLASS_NAME, 'flex').get_attribute("innerHTML") 
+                temp_label = market.find_element(By.XPATH, "//div[contains(text(), 'to') or contains(text(), 'or')]").get_attribute("innerHTML")
                 print(f"Current owned: {current_owned} for {temp_label}")
                 for pending_order in self.pending_orders[:]:
                     if pending_order.label == temp_label:
@@ -789,27 +794,15 @@ def setup_orders_window(driver):
         orders_window = None
 
 if __name__ == "__main__":
-    driver = webdriver.Firefox()
-    market_url = login(driver)
-    # time.sleep(1)
-    dollars_button = WebDriverWait(driver, 5).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "[class^='interactiveHeader']")))[0]
-    driver.execute_script("arguments[0].click();", dollars_button)
-    container = driver.find_element(By.CSS_SELECTOR, '[style="display: flex; min-width: 200px; padding: 4px 16px;"]')
-    limit_button = container.find_elements(By.CSS_SELECTOR, "[class^='row'][class*='interactive']")[2]
-    driver.execute_script("arguments[0].click();", limit_button)
-    # order_driver = webdriver.Firefox()
-    # setup_orders_window(order_driver)
-    # time.sleep(1)
-    market_maker(driver, market_url)
-
     order_driver = webdriver.Firefox()
     market_url = login(order_driver)
-    time.sleep(1)
     dollars_button = WebDriverWait(order_driver, 5).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "[class^='interactiveHeader']")))[0]
     order_driver.execute_script("arguments[0].click();", dollars_button)
-    limit_span = order_driver.find_element(By.XPATH, '//span[contains(text(), "Limit order")]')
+    limit_span = WebDriverWait(order_driver, 5).until(
+        EC.presence_of_element_located((By.XPATH, '//span[contains(text(), "Limit order")]'))
+    )
     container = limit_span.find_element(By.XPATH, './ancestor::div[5]')
-    limit_button = container.find_elements(By.CSS_SELECTOR, "[class^='row'][class*='interactive']")[2]
+    limit_button = WebDriverWait(container, 10).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "[class^='row'][class*='interactive']")))[2]
     order_driver.execute_script("arguments[0].click();", limit_button)
-    time.sleep(2)
+
     market_maker(order_driver, market_url)
