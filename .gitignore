@@ -1,7 +1,6 @@
 .env
+.venv
 __pycache__
 *.pem
-config.ini
-venv
+*.ini
 plots/
-*/plots/

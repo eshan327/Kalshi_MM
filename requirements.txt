@@ -1,7 +1,8 @@
 requests
-python-dateutil
 cryptography
-urllib3
 python-dotenv
 websockets
-datetime
+python-dateutil
+selenium
+matplotlib
+configparser
