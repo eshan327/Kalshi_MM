@@ -21,7 +21,7 @@ class TradingSimulator:
         self.trade_history = []  # [(timestamp, balance, action, profit)]
         self.balance_history = [(datetime.datetime.now(), initial_balance)]
         self.next_sell_time = self.generate_next_sell_time()
-        self.max_open_positions = 1
+        self.max_open_positions = 0
         self.sell_on_next_iteration = False
         self.forced_trade_indices = []
         self.order_tracker = OrderTracker()
@@ -381,7 +381,6 @@ def market_maker(logged_driver, market_url):
             #     continue
 
             markets = tile_group.find_elements(By.XPATH, "*")
-            markets = markets[0:3]
             markets_data = []
             
             for market in markets:
@@ -389,17 +388,28 @@ def market_maker(logged_driver, market_url):
                     contract_id = f"temp_{len(markets_data)}"
                     market_data = {"id": contract_id}
                     
-                    label_container = market.find_element(By.XPATH, "//div[contains(text(), 'to') or contains(text(), 'or')]")
-                    label = label_container.get_attribute("innerHTML")
-                    
-                    print(f"\nProcessing market: {label}")
+                    try:
+                        buy_label = driver.find_element(By.XPATH, '//span[contains(text(), "Buy No")]')
+                    except:
+                        buy_label = driver.find_element(By.XPATH, '//span[contains(text(), "Buy Yes")]')
+
+                    label_span = buy_label.find_element(By.XPATH, '..')
+                    label = label_span.text
+                    label = label.split(' · ')[1]
+                    print(f"\n{label}")
+                    yes_button = market.find_elements(By.TAG_NAME, 'button')[0]
+                    driver.execute_script("arguments[0].scrollIntoView(true);", yes_button)
+                    driver.execute_script("arguments[0].click();", yes_button)
+                    time.sleep(0.3)
                     market.click()
+                    time.sleep(0.3)
+                    
     
                     # yes prices
                     # headingContainer = label_container.find_element(By.XPATH, './ancestor::div[3]').get_attribute("innerHTML")
                     # print(f"Heading container: {headingContainer}")
-                    yes_button = market.find_elements(By.TAG_NAME, 'button')[0]
-                    driver.execute_script("arguments[0].click();", yes_button)
+                    # yes_button = market.find_elements(By.TAG_NAME, 'button')[0]
+                    # driver.execute_script("arguments[0].click();", yes_button)
     
                     yes_orderbook = market.find_element(By.CSS_SELECTOR, "[class^='orderbookContent']")
                     yes_prices_raw = yes_orderbook.find_elements(By.CSS_SELECTOR, "[class^='orderBookItem']")
@@ -451,7 +461,9 @@ def market_maker(logged_driver, market_url):
                     # no prices
                     # headingContainer = market.find_element(By.CSS_SELECTOR, "[class^='headingContainer']")
                     no_button = market.find_elements(By.TAG_NAME, 'button')[1]
+                    driver.execute_script("arguments[0].scrollIntoView(true);", no_button)
                     driver.execute_script("arguments[0].click();", no_button)
+                    time.sleep(0.3)
     
                     no_orderbook = market.find_element(By.CSS_SELECTOR, "[class^='orderbookContent']")
                     no_prices_raw = no_orderbook.find_elements(By.CSS_SELECTOR, "[class^='orderBookItem']")
@@ -460,7 +472,10 @@ def market_maker(logged_driver, market_url):
                         spans = price.find_elements(By.TAG_NAME, 'span')
                         if len(spans) == 5:
                             no_prices.append(int(re.sub(r'[^\d.]', '', spans[2].text)))
-                    
+                    market.click()
+                    time.sleep(0.3)
+                    driver.execute_script("arguments[0].click();", no_button)  
+
                     if len(no_prices) >= 2:
                         no_ask_price = no_prices[0]
                         no_bid_price = no_prices[1]
@@ -495,6 +510,7 @@ def market_maker(logged_driver, market_url):
                                 simulator.place_order_on_kalshi(logged_driver, label, yes_no=1, buy_sell=0, price=no_bid_price + 1, qty=1)
                             else:
                                 print(f"Skipping buy: position limit reached ({current_positions} positions, {pending_buys} pending buys)")
+                        
                         else:
                             print("No market making opportunity")
                     else:
@@ -502,7 +518,7 @@ def market_maker(logged_driver, market_url):
                         print("Contract: No - Insufficient data")
                     
                     markets_data.append(market_data)
-                    
+
                 except Exception as e:
                     print(f"Error: {e}")
                     continue
@@ -644,7 +660,7 @@ class OrderTracker:
         
         for market in markets:
             # Select the element that contains the first text node
-            temp_label = market.find_element(By.XPATH, "//div[contains(text(), 'to') or contains(text(), 'or')]").get_attribute("innerHTML")
+            temp_label = market.find_element(By.XPATH, './/div[contains(text(), "°")]').get_attribute("innerHTML")
             order_label = market.find_elements(By.TAG_NAME, 'span')[1].get_attribute("innerHTML") 
             if "Yes" in order_label or "No" in order_label:
                 parts = order_label.split()
@@ -676,7 +692,7 @@ class OrderTracker:
                             pending_order.previous_owned = current_owned
             else:
                 current_owned = 0
-                temp_label = market.find_element(By.XPATH, "//div[contains(text(), 'to') or contains(text(), 'or')]").get_attribute("innerHTML")
+                temp_label = market.find_element(By.XPATH, './/div[contains(text(), "°")]').get_attribute("innerHTML")
                 print(f"Current owned: {current_owned} for {temp_label}")
                 for pending_order in self.pending_orders[:]:
                     if pending_order.label == temp_label:
