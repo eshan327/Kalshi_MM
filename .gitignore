@@ -3,4 +3,5 @@
 __pycache__
 *.pem
 *.ini
-plots/
+.DS_Store
+/plots

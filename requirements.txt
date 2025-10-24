@@ -1,8 +1,1 @@
-requests
-cryptography
-python-dotenv
-websockets
-python-dateutil
-selenium
-matplotlib
-configparser
+kalshi-python
