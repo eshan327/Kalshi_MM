@@ -1,4 +1,5 @@
 from kalshi_python import Configuration, KalshiClient
+import os
 
 class KalshiAPI:
 
@@ -10,7 +11,7 @@ class KalshiAPI:
 
         # For authenticated requests
         # Read private key from file
-        with open("your_private_key.pem", "r") as f:
+        with open("/Users/twilliams/ApexKalshi/private_key.pem", "r") as f:
             private_key = f.read()
 
         config.api_key_id = "c117c03d-22f9-4826-bdf9-42cfdc2cf436"

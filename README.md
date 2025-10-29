@@ -17,6 +17,7 @@ A Python-based trading automation system for Kalshi prediction markets that incl
 ```
 kalshi_scraper/
 ├── main.py              # Main API client demo
+├── getData.py           # Market data fetcher sorted by spread
 ├── clients.py           # Kalshi HTTP/WebSocket API clients
 ├── scraper.py           # Basic market data scraper
 ├── scraper2.py          # Trading simulator
@@ -73,6 +74,26 @@ kalshi_scraper/
 
 ## Usage
 
+### Market Data Analysis
+
+Get markets sorted by highest spread:
+```bash
+python getData.py --limit 100 --sort-by percentage --top 20
+```
+
+Available options:
+- `--limit`: Number of markets to fetch (default: 100)
+- `--sort-by`: Sort by "percentage" or "absolute" spread (default: percentage)
+- `--top`: Show only top N markets by spread
+- `--output`: Output JSON filename (default: markets_by_spread.json)
+
+Example output:
+```bash
+python getData.py --limit 50 --top 10 --output top_spreads.json
+```
+
+### API Connection Test
+
 Test the Kalshi API connection and get account balance:
 ```bash
 python main.py
@@ -84,6 +105,8 @@ Balance: {'balance': 1000.00}
 WebSocket connection opened.
 Received message: {"type": "ticker_update", "data": {...}}
 ```
+
+### Market Making Bot
 
 Run the latest market scraper to monitor bid-ask spreads, backtest strategies, and run the full bot with live trading:
 ```bash
