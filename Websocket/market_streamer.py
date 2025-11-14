@@ -32,7 +32,7 @@ class KalshiMarketStreamer:
     PROD_WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
     DEMO_WS_URL = "wss://demo-api.kalshi.co/trade-api/ws/v2"
     
-    def __init__(self, market_ids: list = None, market_id: str = None, demo: bool = False):
+    def __init__(self, market_ids: list = None, market_id: str = None, demo: bool = False, channels: list = None):
         """
         Initialize the market streamer.
         
@@ -40,6 +40,7 @@ class KalshiMarketStreamer:
             market_ids: List of market ticker IDs to subscribe to (e.g., ['MARKET1', 'MARKET2'])
             market_id: Single market ticker ID (for backward compatibility)
             demo: Whether to use demo environment (default: False for production)
+            channels: List of channels to subscribe to (default: ["ticker", "orderbook_delta", "trade"])
         """
         # Handle both single market_id (backward compat) and list of market_ids
         if market_ids is None:
@@ -54,6 +55,7 @@ class KalshiMarketStreamer:
         
         self.demo = demo
         self.ws_url = self.DEMO_WS_URL if demo else self.PROD_WS_URL
+        self.default_channels = channels if channels else ["ticker", "orderbook_delta", "trade"]
         self.ws: Optional[Any] = None  # websockets.WebSocketClientProtocol
         self.running = False
         self.reconnect_delay = 5  # seconds
@@ -84,6 +86,21 @@ class KalshiMarketStreamer:
         self.on_ticker_update = None  # Callback(ticker_data, market_id)
         self.on_fill_update = None  # Callback(fill_data, market_id)
         self.on_position_update = None  # Callback(position_data, market_id)
+    
+    def _is_connected(self) -> bool:
+        """
+        Check if WebSocket is connected and open.
+        
+        Returns:
+            True if connected and open, False otherwise
+        """
+        if not self.ws:
+            return False
+        # Check if websocket is closed by checking close_code
+        # close_code is None when open, set to a code when closed
+        if hasattr(self.ws, 'close_code') and self.ws.close_code is not None:
+            return False
+        return True
         
     def _generate_signature(self, timestamp: str) -> str:
         """
@@ -166,7 +183,7 @@ class KalshiMarketStreamer:
                 self.sid_to_market.clear()
             else:
                 # Initial connection - subscribe to default channels
-                markets_to_resubscribe = {market_id: ["ticker", "orderbook_delta", "trade"] for market_id in self.market_ids}
+                markets_to_resubscribe = {market_id: self.default_channels for market_id in self.market_ids}
             
             # Subscribe to all markets
             print(f"[{datetime.now().isoformat()}] Re-subscribing to {len(markets_to_resubscribe)} markets...")
@@ -210,7 +227,7 @@ class KalshiMarketStreamer:
         if channels is None:
             channels = ["ticker", "orderbook_delta", "trade"]
         
-        if not self.ws or self.ws.closed:
+        if not self._is_connected():
             print(f"[{datetime.now().isoformat()}] ⚠ Cannot subscribe: WebSocket not connected")
             return None
         
@@ -258,7 +275,7 @@ class KalshiMarketStreamer:
         Args:
             sids: List of subscription IDs (SIDs) to unsubscribe from
         """
-        if not self.ws or self.ws.closed:
+        if not self._is_connected():
             print(f"[{datetime.now().isoformat()}] ⚠ Cannot unsubscribe: WebSocket not connected")
             return
         
@@ -290,7 +307,7 @@ class KalshiMarketStreamer:
             market_tickers: List of market ticker IDs to add/remove
             action: "add_markets" or "delete_markets"
         """
-        if not self.ws or self.ws.closed:
+        if not self._is_connected():
             print(f"[{datetime.now().isoformat()}] ⚠ Cannot update subscription: WebSocket not connected")
             return
         
@@ -322,7 +339,7 @@ class KalshiMarketStreamer:
         List all active subscriptions.
         Based on Kalshi docs: https://docs.kalshi.com/websockets/
         """
-        if not self.ws or self.ws.closed:
+        if not self._is_connected():
             print(f"[{datetime.now().isoformat()}] ⚠ Cannot list subscriptions: WebSocket not connected")
             return
         
@@ -402,8 +419,14 @@ class KalshiMarketStreamer:
                 # Position update messages (requires authentication)
                 await self.handle_position(data)
             elif msg_type == "heartbeat" or msg_type == "ping":
-                # Respond to heartbeat
-                await self.ws.send(json.dumps({"type": "pong"}))
+                # Respond to heartbeat - some servers may not require a response
+                # Only respond if the message explicitly asks for it
+                try:
+                    # Some websocket implementations expect pong, others don't need a response
+                    # Kalshi may not require a pong response, so we'll skip it to avoid "Unknown command" errors
+                    pass
+                except:
+                    pass
             else:
                 # Generic message handler
                 print(f"[{timestamp}] Received {msg_type} message (unhandled)")
@@ -854,12 +877,17 @@ class KalshiMarketStreamer:
         try:
             while self.running:
                 try:
-                    message = await asyncio.wait_for(self.ws.recv(), timeout=30.0)
+                    # Use a shorter timeout so we can check self.running more frequently
+                    message = await asyncio.wait_for(self.ws.recv(), timeout=5.0)
                     await self.handle_message(message)
                 except asyncio.TimeoutError:
+                    # Check if we should still be running
+                    if not self.running:
+                        break
                     # Send heartbeat to keep connection alive
                     try:
-                        await self.ws.send(json.dumps({"type": "ping"}))
+                        if self.ws and not (hasattr(self.ws, 'close_code') and self.ws.close_code is not None):
+                            await self.ws.send(json.dumps({"type": "ping"}))
                     except:
                         pass
                 except ConnectionClosed as e:
@@ -870,9 +898,13 @@ class KalshiMarketStreamer:
                     print(f"[{datetime.now().isoformat()}] ⚠ WebSocket error: {e}")
                     break
                     
+        except KeyboardInterrupt:
+            print(f"\n[{datetime.now().isoformat()}] Received KeyboardInterrupt in listen()")
+            self.shutdown()
         except Exception as e:
             print(f"[{datetime.now().isoformat()}] ✗ Listen error: {e}")
-            raise
+            if self.running:
+                raise
     
     async def reconnect(self):
         """
@@ -908,9 +940,22 @@ class KalshiMarketStreamer:
         self.running = True
         
         # Setup signal handlers for graceful shutdown
-        loop = asyncio.get_event_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: self.shutdown())
+        # Note: add_signal_handler may not work on all platforms, so we also handle KeyboardInterrupt
+        try:
+            loop = asyncio.get_event_loop()
+            if hasattr(loop, 'add_signal_handler'):
+                def signal_handler(sig):
+                    print(f"\n[{datetime.now().isoformat()}] Received signal {sig}, shutting down...")
+                    self.shutdown()
+                for sig in (signal.SIGTERM, signal.SIGINT):
+                    try:
+                        loop.add_signal_handler(sig, lambda s=sig: signal_handler(s))
+                    except (NotImplementedError, RuntimeError):
+                        # Signal handlers not supported on this platform
+                        pass
+        except Exception as e:
+            # Signal handler setup failed, but we can still handle KeyboardInterrupt
+            pass
         
         try:
             if await self.connect():
@@ -920,7 +965,7 @@ class KalshiMarketStreamer:
                 await self.reconnect()
                 
         except KeyboardInterrupt:
-            print(f"\n[{datetime.now().isoformat()}] Received interrupt signal")
+            print(f"\n[{datetime.now().isoformat()}] Received interrupt signal (Ctrl+C)")
             self.shutdown()
         except Exception as e:
             print(f"[{datetime.now().isoformat()}] ✗ Runtime error: {e}")
@@ -966,6 +1011,13 @@ async def main():
         action="store_true",
         help="Use demo environment instead of production"
     )
+    parser.add_argument(
+        "--channels",
+        type=str,
+        nargs="+",
+        help="Channels to subscribe to (default: ticker orderbook_delta trade). "
+             "Valid: ticker, orderbook_delta, trade, fill, position"
+    )
     
     args = parser.parse_args()
     
@@ -977,7 +1029,14 @@ async def main():
     else:
         parser.error("Either --market-id or --market-ids must be provided")
     
-    streamer = KalshiMarketStreamer(market_ids=market_ids, demo=args.demo)
+    # Validate channels if provided
+    if args.channels:
+        valid_channels = ["ticker", "orderbook_delta", "trade", "fill", "position"]
+        invalid_channels = [ch for ch in args.channels if ch not in valid_channels]
+        if invalid_channels:
+            parser.error(f"Invalid channels: {invalid_channels}. Valid channels are: {valid_channels}")
+    
+    streamer = KalshiMarketStreamer(market_ids=market_ids, demo=args.demo, channels=args.channels)
     
     try:
         await streamer.run()
