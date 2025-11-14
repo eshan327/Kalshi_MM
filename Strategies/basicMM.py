@@ -24,16 +24,24 @@ class BasicMM:
         self.market_spreads = {}  # Dictionary mapping market ticker to spread
         self.reserve_limit = reserve_limit # how much to keep in reserve
         self.demo = demo
+        self.last_cursor = None  # Store the last cursor for pagination continuation
 
-    def get_markets(self, max_total=100000, page_size=100, status="open"):
+    def get_markets(self, max_total=100000, page_size=100, status="open", start_cursor=None):
         """Fetch markets with robust pagination.
 
-        max_total controls the total number of markets to collect.
-        page_size controls the per-request limit (server typically caps at 100).
-        status can be forwarded to the API (e.g., "open", "active", "closed").
+        Args:
+            max_total: Maximum number of markets to collect
+            page_size: Number of markets per request (server typically caps at 100)
+            status: Market status filter (e.g., "open", "active", "closed")
+            start_cursor: Optional cursor to start from (for continuing pagination)
+                          If None, starts from the beginning
+        
+        Returns:
+            MarketResponse object with markets list
         """
         all_markets = []
-        cursor = None
+        # Use provided cursor, or None to start from beginning
+        cursor = start_cursor
 
         while True:
             try:
@@ -53,7 +61,11 @@ class BasicMM:
                 # Continue pagination if a cursor is provided
                 if hasattr(response, 'cursor') and response.cursor:
                     cursor = response.cursor
+                    # Store the cursor for next time
+                    self.last_cursor = cursor
                 else:
+                    # No more pages
+                    self.last_cursor = None
                     break
 
                 # Stop if we've reached the requested total
@@ -67,20 +79,52 @@ class BasicMM:
                     fallback_params = {"limit": min(page_size, 100)}
                     if status is not None:
                         fallback_params["status"] = status
+                    if cursor:
+                        fallback_params["cursor"] = cursor
                     response = self.client.get_markets(**fallback_params)
                     if hasattr(response, 'markets') and response.markets:
                         all_markets.extend(response.markets)
+                        # Update cursor if available
+                        if hasattr(response, 'cursor') and response.cursor:
+                            self.last_cursor = response.cursor
                 except Exception as fallback_error:
                     print(f"Fallback also failed: {fallback_error}")
                 break
 
         print(f"Successfully fetched {len(all_markets)} valid markets")
+        if self.last_cursor:
+            print(f"Last cursor stored. Use get_next_markets() to continue from here.")
 
         class MarketResponse:
             def __init__(self, markets):
                 self.markets = markets
 
         return MarketResponse(all_markets)
+    
+    def get_next_markets(self, max_total=10000, page_size=100, status="open"):
+        """
+        Get the next batch of markets continuing from the last cursor.
+        This is useful when you've already fetched markets and want to continue.
+        
+        Args:
+            max_total: Maximum number of markets to collect in this batch
+            page_size: Number of markets per request
+            status: Market status filter
+        
+        Returns:
+            MarketResponse object with markets list
+        """
+        if self.last_cursor is None:
+            print("No previous cursor found. Starting from the beginning.")
+        else:
+            print(f"Continuing from cursor: {self.last_cursor[:50]}..." if len(str(self.last_cursor)) > 50 else f"Continuing from cursor: {self.last_cursor}")
+        
+        return self.get_markets(max_total=max_total, page_size=page_size, status=status, start_cursor=self.last_cursor)
+    
+    def reset_cursor(self):
+        """Reset the stored cursor to start from the beginning next time."""
+        self.last_cursor = None
+        print("Cursor reset. Next get_markets() call will start from the beginning.")
 
     def get_market_trades(self, market_id):
         return self.client.get_market_trades(market_id)
@@ -107,9 +151,22 @@ class BasicMM:
             print(f"Error getting balance: {e}")
             return 0  # Return 0 if we can't get balance
 
-    def identify_market_opportunities(self, max_total=100000):
+    def identify_market_opportunities(self, max_total=100000, continue_from_last=False):
+        """
+        Identify market opportunities from fetched markets.
+        
+        Args:
+            max_total: Maximum number of markets to fetch and analyze
+            continue_from_last: If True, continue from last cursor instead of starting from beginning
+        """
         start_time = time.perf_counter()
-        markets_response = self.get_markets(max_total=max_total, page_size=100, status="open")
+        
+        if continue_from_last:
+            print("Continuing from last cursor position...")
+            markets_response = self.get_next_markets(max_total=max_total, page_size=100, status="open")
+        else:
+            markets_response = self.get_markets(max_total=max_total, page_size=100, status="open")
+        
         markets = markets_response.markets if hasattr(markets_response, 'markets') else markets_response
         opportunities = []  # Will store tuples of (market, spread)
         market_spreads = {}  # Dictionary to map market ticker to spread for easy access
@@ -120,7 +177,14 @@ class BasicMM:
             # Calculate spread from bid/ask prices
             spread = 0
             if hasattr(market, 'yes_bid') and hasattr(market, 'yes_ask') and market.yes_bid is not None and market.yes_ask is not None:
-                spread = market.yes_ask - market.yes_bid
+                # Prices might be in cents (0-100) or probability (0-1)
+                # Convert to probability format for consistency
+                if market.yes_bid > 1 or market.yes_ask > 1:
+                    # Prices are in cents, convert to probability
+                    spread = (market.yes_ask - market.yes_bid) / 100.0
+                else:
+                    # Prices are already in probability format
+                    spread = market.yes_ask - market.yes_bid
             
             volume = getattr(market, 'volume', 0) or 0
             if spread > 0.03 and volume > 1000:
@@ -196,57 +260,147 @@ class BasicMM:
         Places orders slightly inside the spread to get filled first.
         
         Args:
-            yes_bid: Best bid price in cents (0-100)
-            yes_ask: Best ask price in cents (0-100)
+            marketID: Market ticker ID string
             
         Returns:
-            Tuple of (buy_price_cents, sell_price_cents) both in range 1-99
+            Tuple of (buy_price_cents, sell_price_cents) both in range 1-99, or (None, None) on error
         """
+        try:
+            # First, try to get the market from our cached opportunities if available
+            # This ensures we use the same market object that has the data
+            market = None
+            if hasattr(self, 'market_opportunities') and self.market_opportunities:
+                for m in self.market_opportunities:
+                    market_ticker = getattr(m, 'ticker', None) or (m if isinstance(m, str) else None)
+                    if market_ticker == marketID:
+                        market = m
+                        break
+            
+            # If not found in cache, fetch from API
+            if market is None:
+                market = self.client.get_market(marketID)
+                if market is None:
+                    print(f"Error: Failed to get market data for {marketID}")
+                    return None, None
+            
+            # Debug: Print what we actually got
+            print(f"DEBUG get_price for {marketID}:")
+            print(f"  Market type: {type(market)}")
+            print(f"  Has yes_bid attr: {hasattr(market, 'yes_bid')}")
+            print(f"  Has yes_ask attr: {hasattr(market, 'yes_ask')}")
+            if hasattr(market, 'yes_bid'):
+                print(f"  yes_bid value: {market.yes_bid} (type: {type(market.yes_bid)})")
+            if hasattr(market, 'yes_ask'):
+                print(f"  yes_ask value: {market.yes_ask} (type: {type(market.yes_ask)})")
+            
+            # Try to get values - use the same pattern that works in identify_market_opportunities
+            yes_bid = None
+            yes_ask = None
+            
+            # Method 1: Direct attribute access (like in identify_market_opportunities line 179)
+            if hasattr(market, 'yes_bid') and hasattr(market, 'yes_ask'):
+                try:
+                    yes_bid = market.yes_bid
+                    yes_ask = market.yes_ask
+                except AttributeError:
+                    pass
+            
+            # Method 2: getattr fallback
+            if yes_bid is None:
+                yes_bid = getattr(market, 'yes_bid', None)
+            if yes_ask is None:
+                yes_ask = getattr(market, 'yes_ask', None)
+            
+            # Method 3: Try dictionary access if it's a dict
+            if yes_bid is None and isinstance(market, dict):
+                yes_bid = market.get('yes_bid')
+            if yes_ask is None and isinstance(market, dict):
+                yes_ask = market.get('yes_ask')
+            
+            print(f"  Final yes_bid: {yes_bid}, yes_ask: {yes_ask}")
+            
+            # Handle case where values might be 0 (falsy but not None)
+            # 0 is not a valid price, so treat it as missing data
+            if yes_bid is None or yes_ask is None or yes_bid == 0 or yes_ask == 0:
+                print(f"Warning: No bid/ask prices available for market {marketID} (yes_bid={yes_bid}, yes_ask={yes_ask})")
+                # Print all non-callable attributes for debugging
+                print(f"  All market attributes:")
+                for attr in dir(market):
+                    if not attr.startswith('_') and not callable(getattr(market, attr, None)):
+                        try:
+                            value = getattr(market, attr)
+                            print(f"    {attr} = {value}")
+                        except:
+                            pass
+                return None, None
 
-        market = self.client.get_market(marketID)
-        yes_bid = getattr(market, 'yes_bid', None)
-        yes_ask = getattr(market, 'yes_ask', None)
-
-        if yes_bid is None or yes_ask is None:
-            print(f"Warning: No bid/ask prices available for market {marketID}")
-            return None, None
-
-        # Convert to integers
-        base_buy_price = int(yes_bid)
-        base_sell_price = int(yes_ask)
-        
-        # For market making: place orders slightly inside the spread to get filled first
-        # Buy at bid + 1 cent (to outbid others and get filled first)
-        # Sell at ask - 1 cent (to undercut others and get filled first)
-        buy_price_cents = base_buy_price + 1
-        sell_price_cents = base_sell_price - 1
-        
-        # Ensure prices are within valid range (1-99 cents) for the API
-        buy_price_cents = max(1, min(99, buy_price_cents))
-        sell_price_cents = max(1, min(99, sell_price_cents))
-        
-        # Ensure we don't cross the spread (buy price should be < sell price)
-        if buy_price_cents >= sell_price_cents:
-            # If prices would cross, use the mid-price approach
-            mid_price = (base_buy_price + base_sell_price) // 2
-            buy_price_cents = max(1, min(99, mid_price - 1))
-            sell_price_cents = max(1, min(99, mid_price + 1))
-            # Ensure buy < sell
+            # Convert to integers (prices are typically in cents, 0-100 range)
+            try:
+                base_buy_price = int(yes_bid)
+                base_sell_price = int(yes_ask)
+            except (ValueError, TypeError) as e:
+                print(f"Error: Invalid price format for market {marketID} (yes_bid={yes_bid}, yes_ask={yes_ask}): {e}")
+                return None, None
+            
+            # Validate price range
+            if not (0 <= base_buy_price <= 100) or not (0 <= base_sell_price <= 100):
+                print(f"Warning: Prices out of valid range for market {marketID} (bid={base_buy_price}, ask={base_sell_price})")
+                return None, None
+            
+            # For market making: place orders slightly inside the spread to get filled first
+            # Buy at bid + 1 cent (to outbid others and get filled first)
+            # Sell at ask - 1 cent (to undercut others and get filled first)
+            buy_price_cents = base_buy_price + 1
+            sell_price_cents = base_sell_price - 1
+            
+            # Ensure prices are within valid range (1-99 cents) for the API
+            buy_price_cents = max(1, min(99, buy_price_cents))
+            sell_price_cents = max(1, min(99, sell_price_cents))
+            
+            # Ensure we don't cross the spread (buy price should be < sell price)
             if buy_price_cents >= sell_price_cents:
-                buy_price_cents = max(1, sell_price_cents - 1)
-        
-        return buy_price_cents, sell_price_cents
+                # If prices would cross, use the mid-price approach
+                mid_price = (base_buy_price + base_sell_price) // 2
+                buy_price_cents = max(1, min(99, mid_price - 1))
+                sell_price_cents = max(1, min(99, mid_price + 1))
+                # Ensure buy < sell
+                if buy_price_cents >= sell_price_cents:
+                    buy_price_cents = max(1, sell_price_cents - 1)
+            
+            return buy_price_cents, sell_price_cents
+            
+        except Exception as e:
+            print(f"Error in get_price for market {marketID}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None, None
 
 # executes market making trades for all markets in market_id_list.  Bankroll is the amount of money to be used.
     def trade(self, market_id_list, bankroll): 
         print("--- WARNING: trading with actual money ---")
+        print(f"\n{'='*80}")
+        print(f"TRADING SESSION STARTED")
+        print(f"{'='*80}")
+        print(f"Total markets to process: {len(market_id_list)}")
+        print(f"Starting bankroll: ${bankroll/100:.2f}")
+        
+        # Print list of markets to be traded
+        print(f"\nMarkets to trade:")
+        for i, market in enumerate(market_id_list, 1):
+            market_id = market.ticker if hasattr(market, 'ticker') else market
+            print(f"  {i}. {market_id}")
+        
+        print(f"{'='*80}\n")
+        
         # Track remaining bankroll as we place orders
         remaining_bankroll = bankroll
+        successfully_traded_markets = []  # Track markets where both orders were placed
+        failed_markets = []  # Track markets that failed
         
         for i in range(len(market_id_list)):
             # Check if we have enough bankroll before processing this market
             if remaining_bankroll <= 0:
-                print(f"Insufficient bankroll. Stopping after {i} markets. Remaining: ${remaining_bankroll/100:.2f}")
+                print(f"Insufficient bankroll. Stopping after {i} markets. Remaining: ${remaining_bankroll:.2f}")
                 break
                 
             market = market_id_list[i]
@@ -255,6 +409,11 @@ class BasicMM:
             
             
             buy_price_cents, sell_price_cents = self.get_price(market_id)
+            
+            # Check if get_price returned None values (error case)
+            if buy_price_cents is None or sell_price_cents is None:
+                print(f"Error: Could not get prices for market {market_id}. Skipping this market.")
+                continue
             
             # Note: Prices are stored in probability format (0-1) for logging, but API uses cents (1-99)
             buy_price_prob = buy_price_cents / 100.0
@@ -343,12 +502,36 @@ class BasicMM:
             
             # check both were created
             if not buy_order or not sell_order:
-                print(f"Failed to create buy or sell order for market {market_id}")
+                print(f"⚠ Failed to create buy or sell order for market {market_id}")
+                failed_markets.append(market_id)
 
                 if buy_order:
                     self.client.cancel_order(buy_order.id)
                 if sell_order:
                     self.client.cancel_order(sell_order.id)
+            else:
+                # Both orders successfully placed
+                successfully_traded_markets.append(market_id)
+                print(f"✓ Successfully placed both orders for {market_id} (Buy @ ${buy_price_cents/100:.2f}, Sell @ ${sell_price_cents/100:.2f})")
+        
+        # Print summary of trading session
+        print(f"\n{'='*80}")
+        print(f"TRADING SESSION SUMMARY")
+        print(f"{'='*80}")
+        print(f"Successfully traded markets: {len(successfully_traded_markets)}")
+        if successfully_traded_markets:
+            print(f"\nMarkets with both orders placed:")
+            for market_id in successfully_traded_markets:
+                print(f"  ✓ {market_id}")
+        
+        if failed_markets:
+            print(f"\nFailed markets: {len(failed_markets)}")
+            for market_id in failed_markets:
+                print(f"  ✗ {market_id}")
+        
+        print(f"\nRemaining bankroll: ${remaining_bankroll/100:.2f}")
+        print(f"Total spent: ${(bankroll - remaining_bankroll)/100:.2f}")
+        print(f"{'='*80}\n")
             
                 
     async def run(self):
@@ -364,6 +547,7 @@ class BasicMM:
     def run(self, bankroll): # non async version
         if bankroll > 0:
             self.identify_market_opportunities()
+            self.market_opportunities = self.filter_market_opportunities()
             if len(self.market_opportunities) > 0:
                 self.trade(self.market_opportunities, bankroll)
             else:
@@ -371,7 +555,8 @@ class BasicMM:
 
     def run_test(self): # test one limit order placement
         if (len(self.market_opportunities) > 0):
-            self.trade(self.market_opportunities, 10)
+            self.market_opportunities = self.filter_market_opportunities()
+            self.trade(self.market_opportunities, 1000)
         else:
             print("No trading opportunities available - skipping trade execution")
 
@@ -397,7 +582,8 @@ class BasicMM:
         
         for market in self.market_opportunities:
             # Basic filters
-            spread = self.get_market_spread(market)  # Get spread from market_spreads dict
+            # Get spread from market_spreads dict, or calculate it if not available
+            spread = self.get_market_spread(market)
             volume = getattr(market, 'volume', 0) or 0
             yes_ask = getattr(market, 'yes_ask', None)
             yes_bid = getattr(market, 'yes_bid', None)
@@ -406,9 +592,24 @@ class BasicMM:
             if yes_ask is None or yes_bid is None:
                 continue
             
-            # Apply basic filters
+            # If spread not in dictionary, calculate it from bid/ask
+            if spread == 0:
+                # Calculate spread from bid/ask prices (convert from cents to probability if needed)
+                # Prices might be in cents (0-100) or probability (0-1)
+                if yes_bid > 1 or yes_ask > 1:
+                    # Prices are in cents, convert to probability
+                    spread = (yes_ask - yes_bid) / 100.0
+                else:
+                    # Prices are already in probability format
+                    spread = yes_ask - yes_bid
+            
+            # Normalize prices for comparison (convert to probability if in cents)
+            yes_bid_prob = yes_bid / 100.0 if (yes_bid > 1) else yes_bid
+            yes_ask_prob = yes_ask / 100.0 if (yes_ask > 1) else yes_ask
+            
+            # Apply basic filters (all comparisons in probability format)
             if not (spread > min_spread and volume > min_volume and spread < max_spread and 
-                   yes_ask > min_price and yes_bid > min_price):
+                   yes_ask_prob > min_price and yes_bid_prob > min_price):
                 continue
             
             # Filter by resolution date if specified
@@ -447,16 +648,14 @@ class BasicMM:
 # execute a single market making trade for the market in market_id_list.  Contracts is the number of contracts to trade
     def trade_single(self, market_id, contracts):
         print("--- WARNING: trading with actual money ---")
-        market = self.client.get_market(market_id)
-        yes_bid = getattr(market, 'yes_bid', None)
-        yes_ask = getattr(market, 'yes_ask', None)
         
-        if yes_bid is None or yes_ask is None:
-            print(f"Warning: No bid/ask prices available for market {market_id}")
+        # Get buy and sell prices using the shared function (pass market_id, not yes_bid/yes_ask)
+        buy_price_cents, sell_price_cents = self.get_price(market_id)
+        
+        # Check if get_price returned None values (error case)
+        if buy_price_cents is None or sell_price_cents is None:
+            print(f"Error: Could not get prices for market {market_id}. Cannot place orders.")
             return
-        
-        # Get buy and sell prices using the shared function
-        buy_price_cents, sell_price_cents = self.get_price(yes_bid, yes_ask)
         
         self.client.create_order(ticker=market_id,
                         side="yes",
