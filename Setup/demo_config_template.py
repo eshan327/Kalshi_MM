@@ -1,9 +1,15 @@
 # Demo Configuration for Kalshi
 # Copy this file to demo_config.py and fill in your demo credentials
 
+import os
+import config
+
+# Get the Setup directory path
+SETUP_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Demo API credentials (get these from Kalshi demo environment)
-DEMO_API_KEY_ID = "your_api_key"
-DEMO_PRIVATE_KEY_FILE = "/Users/twilliams/ApexKalshi/private_demo_key.pem"
+DEMO_API_KEY_ID = config.DEMO_API_KEY_ID
+DEMO_PRIVATE_KEY_FILE = os.path.join(SETUP_DIR, "private_demo_key.pem")
 
 # Demo environment settings
 DEMO_HOST = "https://demo-api.kalshi.co/trade-api/v2"

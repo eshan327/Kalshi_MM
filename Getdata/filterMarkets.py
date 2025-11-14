@@ -1,11 +1,24 @@
 import json
 import argparse
+import os
 from typing import List, Dict, Any, Optional
+
+# Get project root directory
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
 
 def load_markets(json_file: str) -> List[Dict[str, Any]]:
     """Load markets from a JSON file."""
     try:
+        # If file doesn't have path, try data directory first, then current dir
+        if os.path.dirname(json_file) == '':
+            # Try data directory first
+            data_path = os.path.join(DATA_DIR, json_file)
+            if os.path.exists(data_path):
+                json_file = data_path
+            # Otherwise use as-is (current directory)
+        
         with open(json_file, 'r') as f:
             markets = json.load(f)
         print(f"Loaded {len(markets)} markets from {json_file}")
@@ -211,11 +224,20 @@ def filter_by_multiple_criteria(markets: List[Dict[str, Any]], min_volume: Optio
 
 
 def save_filtered_markets(markets: List[Dict[str, Any]], output_file: str) -> None:
-    """Save filtered markets to a JSON file."""
+    """Save filtered markets to a JSON file in data directory."""
     try:
-        with open(output_file, 'w') as f:
+        # Ensure data directory exists
+        os.makedirs(DATA_DIR, exist_ok=True)
+        
+        # If output_file doesn't have path, save to data directory
+        if os.path.dirname(output_file) == '':
+            filepath = os.path.join(DATA_DIR, output_file)
+        else:
+            filepath = output_file
+        
+        with open(filepath, 'w') as f:
             json.dump(markets, f, indent=2)
-        print(f"✓ Saved {len(markets)} filtered markets to {output_file}")
+        print(f"✓ Saved {len(markets)} filtered markets to {filepath}")
     except Exception as e:
         print(f"Error saving to {output_file}: {e}")
 

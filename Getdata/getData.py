@@ -1,7 +1,14 @@
 import json
 import argparse
 from typing import List, Dict, Any
-from apiSetup import KalshiAPI
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from Setup.apiSetup import KalshiAPI
+
+# Get project root directory
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
 def setup_client():
     """Setup and return a Kalshi client using apiSetup."""
@@ -197,8 +204,17 @@ def format_market_data(markets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return formatted_markets
 
 def save_to_json(data: List[Dict[str, Any]], filename: str = "markets_by_spread.json") -> None:
-    """Save market data to JSON file."""
+    """Save market data to JSON file in data directory."""
     try:
+        # Ensure data directory exists
+        os.makedirs(DATA_DIR, exist_ok=True)
+        
+        # If filename doesn't have path, save to data directory
+        if os.path.dirname(filename) == '':
+            filepath = os.path.join(DATA_DIR, filename)
+        else:
+            filepath = filename
+        
         # Convert datetime objects to strings for JSON serialization
         def convert_datetime(obj):
             if hasattr(obj, 'isoformat'):
@@ -216,9 +232,9 @@ def save_to_json(data: List[Dict[str, Any]], filename: str = "markets_by_spread.
         
         cleaned_data = clean_data(data)
         
-        with open(filename, 'w') as f:
+        with open(filepath, 'w') as f:
             json.dump(cleaned_data, f, indent=2)
-        print(f"Data saved to {filename}")
+        print(f"Data saved to {filepath}")
     except Exception as e:
         print(f"Error saving to JSON: {e}")
 

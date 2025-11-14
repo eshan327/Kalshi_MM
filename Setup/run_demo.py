@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-Production runner for BasicMM on Kalshi's production environment
+Demo runner for BasicMM on Kalshi's demo environment
 """
 
-from basicMM import BasicMM
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from Strategies.basicMM import BasicMM
 import time
 
 def main():
-    print("Starting BasicMM on Kalshi PRODUCTION environment...")
+    print("Starting BasicMM on Kalshi DEMO environment...")
     print("=" * 50)
     
-    # Initialize market maker for production (demo=False)
-    mm = BasicMM(reserve_limit=10, demo=False)
+    # Initialize market maker for demo
+    mm = BasicMM(reserve_limit=10, demo=True)
     
     print(f"Demo mode: {mm.demo}")
     print(f"Reserve limit: ${mm.reserve_limit}")
@@ -46,18 +49,22 @@ def main():
                 ticker = getattr(market, 'ticker', 'Unknown')
                 print(f"{i}. {ticker}: Spread = {spread:.4f}")
         else:
-            print("\nNo opportunities found - markets may have tight spreads")
-            print("This is normal when markets are efficient or during low volatility")
+            print("\nNo opportunities found - this is normal for demo environments")
+            print("Demo markets typically have no active trading or tight spreads")
         
         # Run single iteration (non-async)
         print("\nRunning single trading iteration...")
         try:
             mm.run()
-            print("\nProduction run completed successfully!")
+            print("\nDemo completed successfully!")
+        except Exception as e:
+            print(f"\nDemo completed with expected limitations: {e}")
+            print("This is normal for demo environments without trading permissions.")
             
-            # Check if log file was created
+            # Check if log file was created despite the error
             try:
-                with open("tradeLimitOrders.log", "r") as f:
+                log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "tradeLimitOrders.log")
+                with open(log_file, "r") as f:
                     content = f.read()
                     if content.strip():
                         print(f"\nTrade log file created with {len(content.splitlines())} entries")
@@ -69,15 +76,10 @@ def main():
                         print("\nTrade log file exists but is empty")
             except FileNotFoundError:
                 print("\nNo trade log file created (no opportunities found or no trades attempted)")
-                
-        except Exception as e:
-            print(f"\nTrading iteration completed with issues: {e}")
-            print("This may be due to insufficient balance, permissions, or market conditions.")
-            
+        
     except Exception as e:
         print(f"Error: {e}")
-        print("Make sure you have valid production credentials set up.")
-        print("Check that your private key file exists and API key is correct.")
+        print("Make sure you have valid demo credentials set up.")
 
 if __name__ == "__main__":
     main()

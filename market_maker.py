@@ -1,20 +1,16 @@
-from kalshi_python import Configuration, KalshiClient
+import os
+import sys
 
-# Configure the client
-config = Configuration(
-    host="https://api.elections.kalshi.com/trade-api/v2"
-)
+# Add Setup directory to path for imports
+SETUP_DIR = os.path.join(os.path.dirname(__file__), "Setup")
+if SETUP_DIR not in sys.path:
+    sys.path.insert(0, SETUP_DIR)
 
-# For authenticated requests
-# Read private key from file
-with open("path/to/private_key.pem", "r") as f:
-    private_key = f.read()
+from Setup.apiSetup import KalshiAPI
 
-config.api_key_id = "your-api-key-id"
-config.private_key_pem = private_key
-
-# Initialize the client
-client = KalshiClient(config)
+# Use the KalshiAPI class for proper setup
+api = KalshiAPI()
+client = api.get_client(demo=False)  # Use demo=True for demo environment
 
 # Make API calls
 balance = client.get_balance()

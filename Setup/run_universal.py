@@ -3,8 +3,10 @@
 Universal runner for BasicMM - choose between demo and production environments
 """
 
-from basicMM import BasicMM
 import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from Strategies.basicMM import BasicMM
 import time
 
 def main():
@@ -101,7 +103,8 @@ def main():
             
             # Check if log file was created
             try:
-                with open("tradeLimitOrders.log", "r") as f:
+                log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "tradeLimitOrders.log")
+                with open(log_file, "r") as f:
                     content = f.read()
                     if content.strip():
                         print(f"\nTrade log file created with {len(content.splitlines())} entries")

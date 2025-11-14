@@ -1,0 +1,23 @@
+# Example markets file for orderbook listeners
+# Lines starting with # are ignored
+# Empty lines are ignored
+# One market ID per line
+
+# Basketball spreads
+KXNBASPREAD-25NOV05BKNIND-IND12
+
+# Hockey spreads
+KXNHLSPREAD-25NOV01CARBOS-BOS1
+
+# MLB games
+KXMLBGAME-25OCT31LADTOR-LAD
+
+# Add more markets below, one per line:
+# MARKET-ID-1
+# MARKET-ID-2
+# MARKET-ID-3
+
+
+
+
+
