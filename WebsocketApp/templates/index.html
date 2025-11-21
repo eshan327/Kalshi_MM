@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kalshi Real-time Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Kalshi Real-time Dashboard</h1>
+        </header>
+        
+        <!-- Connection Status -->
+        <div id="connection-status" class="status-card">
+            <h2 id="status-title">🔄 Connecting...</h2>
+            <p id="status-message">Establishing WebSocket connection...</p>
+        </div>
+
+        <div class="main-grid">
+            <!-- Market Subscription Panel -->
+            <div class="control-panel">
+                <h3>Market Subscription</h3>
+                
+                <div class="input-group">
+                    <label for="market-id">Market ID:</label>
+                    <input 
+                        type="text" 
+                        id="market-id" 
+                        placeholder="Enter Market ID (e.g., KXRELEASECPI-25)"
+                    />
+                    <button id="subscribe-btn" class="btn btn-primary" disabled>
+                        Subscribe
+                    </button>
+                </div>
+
+                <div class="stats-row">
+                    <div class="stat-item">
+                        <strong>Subscribed Markets: </strong>
+                        <span id="subscribed-count">0</span>
+                    </div>
+                </div>
+                
+                <!-- Subscription Manager -->
+                <div class="subscription-manager">
+                    <h4>Active Subscriptions</h4>
+                    <div id="subscriptions-list" class="subscriptions-list">
+                        <div class="no-subscriptions">
+                            <p>No active subscriptions</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Console Terminal -->
+            <div class="logs-panel">
+                <div class="logs-header">
+                    <h3>WebSocket Console</h3>
+                    <div class="log-controls">
+                        <button id="force-reconnect" class="btn btn-small btn-success">Reconnect</button>
+                        <button id="clear-logs" class="btn btn-small btn-secondary">Clear</button>
+                    </div>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <strong>Active Markets:</strong><br/>
+                        <span id="active-markets-count">0</span>
+                    </div>
+                    <div class="stat-card">
+                        <strong>Connection:</strong><br/>
+                        <span id="connection-status-text">CONNECTING</span>
+                    </div>
+                </div>
+
+                <!-- Terminal Console -->
+                <div id="logs-terminal" class="terminal">
+                    <div id="logs-placeholder" class="logs-placeholder">
+                        🔌 WebSocket Terminal Ready<br/>
+                        <span>Waiting for connection attempts...</span>
+                    </div>
+                    <div id="logs-content" class="logs-content" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Orderbook Display -->
+        <div class="orderbook-section">
+            <div class="orderbook-header">
+                <h3>Orderbook</h3>
+                <select id="orderbook-market-select" class="market-select">
+                    <option value="">Select Market</option>
+                </select>
+            </div>
+            <div id="orderbook-display" class="orderbook-container">
+                <div class="no-market-selected">
+                    <p>Select a market from the dropdown above to view the orderbook</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Price Chart Section -->
+        <div class="chart-section">
+            <div class="chart-header">
+                <h3>Price Chart</h3>
+                <div class="chart-controls">
+                    <select id="chart-market-select" class="market-select">
+                        <option value="">Select Market</option>
+                    </select>
+                    <button id="clear-chart" class="btn btn-small">Clear Chart</button>
+                </div>
+            </div>
+            <div class="chart-container">
+                <canvas id="priceChart"></canvas>
+            </div>
+        </div>
+
+        <!-- No Markets Message -->
+        <div id="no-markets" class="no-markets-card">
+            <h3>No Markets Subscribed</h3>
+            <p>Enter a Market ID above to start receiving live market data</p>
+        </div>
+
+        <!-- Footer -->
+        <footer>
+            <p>Kalshi WebSocket Dashboard</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
+

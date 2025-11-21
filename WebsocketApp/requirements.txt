@@ -1,0 +1,6 @@
+# This file is kept for reference, but dependencies are now in ../requirements.txt
+# Install from the root requirements.txt instead:
+#   pip install -r ../requirements.txt
+#
+# Or install just the web app dependencies:
+-r ../requirements.txt

@@ -439,7 +439,7 @@ class BasicMM:
                         ticker=market_id,
                         side="yes",
                         action="buy",
-                        count=1,
+                        count=10,
                         type="limit",
                         yes_price=buy_price_cents
                     )
@@ -462,7 +462,7 @@ class BasicMM:
                         ticker=market_id,
                         side="yes",
                         action="sell",
-                        count=1,
+                        count=10,
                         type="limit",
                         yes_price=sell_price_cents
                     )
@@ -660,7 +660,8 @@ class BasicMM:
         self.client.create_order(ticker=market_id,
                         side="yes",
                         action="buy",
-                        count=contracts,
+                        count=contracts
+                        ,
                         type="limit",
                         yes_price=buy_price_cents)
                         
