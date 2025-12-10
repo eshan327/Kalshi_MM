@@ -12,7 +12,7 @@ import time
 import hashlib
 import base64
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Callable, Awaitable
 
 # Add project root to path for imports
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -21,7 +21,8 @@ from Setup.apiSetup import KalshiAPI
 import websockets
 from websockets.exceptions import ConnectionClosed, WebSocketException
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from cryptography.hazmat.backends import default_backend
 
 
@@ -32,7 +33,7 @@ class KalshiMarketStreamer:
     PROD_WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
     DEMO_WS_URL = "wss://demo-api.kalshi.co/trade-api/ws/v2"
     
-    def __init__(self, market_ids: list = None, market_id: str = None, demo: bool = False, channels: list = None):
+    def __init__(self, market_ids: Optional[List[str]] = None, market_id: Optional[str] = None, demo: bool = False, channels: Optional[List[str]] = None):
         """
         Initialize the market streamer.
         
@@ -77,15 +78,16 @@ class KalshiMarketStreamer:
         self.private_key = getattr(config, 'private_key_pem', None)
         
         # Track active orders for trading functionality (via REST API)
-        self.active_orders = {}  # {order_id: order_info}
+        self.active_orders: Dict[str, Dict[str, Any]] = {}  # {order_id: order_info}
         
         # Callbacks for trading integration
         # These are called when WebSocket receives market updates
         # Trading logic executes via REST API (self.api_client)
-        self.on_orderbook_update = None  # Callback(orderbook_data, market_id)
-        self.on_ticker_update = None  # Callback(ticker_data, market_id)
-        self.on_fill_update = None  # Callback(fill_data, market_id)
-        self.on_position_update = None  # Callback(position_data, market_id)
+        self.on_orderbook_update: Optional[Callable[[Dict[str, Any], Optional[str]], Awaitable[None]]] = None
+        self.on_ticker_update: Optional[Callable[[Dict[str, Any], Optional[str]], Awaitable[None]]] = None
+        self.on_trade_update: Optional[Callable[[Dict[str, Any], Optional[str]], Awaitable[None]]] = None
+        self.on_fill_update: Optional[Callable[[Dict[str, Any], Optional[str]], Awaitable[None]]] = None
+        self.on_position_update: Optional[Callable[[Dict[str, Any], Optional[str]], Awaitable[None]]] = None
     
     def _is_connected(self) -> bool:
         """
@@ -109,12 +111,21 @@ class KalshiMarketStreamer:
         For websocket, we sign: timestamp + endpoint path
         """
         try:
+            if self.private_key is None:
+                print(f"[{datetime.now().isoformat()}] ⚠ No private key available for signing")
+                return ""
+            
             # Load private key
-            private_key_obj = serialization.load_pem_private_key(
+            loaded_key = serialization.load_pem_private_key(
                 self.private_key.encode('utf-8'),
                 password=None,
                 backend=default_backend()
             )
+            
+            # Cast to RSAPrivateKey - Kalshi uses RSA keys
+            if not isinstance(loaded_key, RSAPrivateKey):
+                raise TypeError("Private key must be an RSA key")
+            private_key_obj: RSAPrivateKey = loaded_key
             
             # Create message to sign: timestamp + endpoint path
             # For websocket connection, use the endpoint path
@@ -208,7 +219,7 @@ class KalshiMarketStreamer:
         # For now, we skip this since header-based auth seems to be working
         pass
     
-    async def subscribe_to_market(self, market_id: str = None, channels: list = None):
+    async def subscribe_to_market(self, market_id: Optional[str] = None, channels: Optional[List[str]] = None):
         """
         Subscribe to market data for a specific market ID.
         Can be called after connection to add more markets dynamically.
@@ -254,6 +265,9 @@ class KalshiMarketStreamer:
             }
             
             # Send subscription message
+            if self.ws is None:
+                print(f"[{datetime.now().isoformat()}] ⚠ WebSocket not connected")
+                return None
             await self.ws.send(json.dumps(subscription_message))
             print(f"[{datetime.now().isoformat()}] ✓ Sent subscribe command (id={subscription_id}) for {market_id}, channels: {channels}")
             
@@ -291,6 +305,8 @@ class KalshiMarketStreamer:
                 }
             }
             
+            if self.ws is None:
+                return
             await self.ws.send(json.dumps(unsubscribe_message))
             print(f"[{datetime.now().isoformat()}] ✓ Sent unsubscribe command (id={unsubscribe_id}) for SIDs: {sids}")
             
@@ -328,6 +344,8 @@ class KalshiMarketStreamer:
                 }
             }
             
+            if self.ws is None:
+                return
             await self.ws.send(json.dumps(update_message))
             print(f"[{datetime.now().isoformat()}] ✓ Sent update_subscription command (id={update_id}): {action} for {market_tickers}")
             
@@ -352,13 +370,15 @@ class KalshiMarketStreamer:
                 "cmd": "list_subscriptions"
             }
             
+            if self.ws is None:
+                return
             await self.ws.send(json.dumps(list_message))
             print(f"[{datetime.now().isoformat()}] ✓ Sent list_subscriptions command (id={list_id})")
             
         except Exception as e:
             print(f"[{datetime.now().isoformat()}] ✗ List subscriptions error: {e}")
     
-    async def subscribe_to_multiple_markets(self, market_ids: list, channels: list = None):
+    async def subscribe_to_multiple_markets(self, market_ids: List[str], channels: Optional[List[str]] = None):
         """
         Subscribe to multiple markets at once.
         
@@ -540,6 +560,11 @@ class KalshiMarketStreamer:
             
             # Note: This is for public trades, not user fills
             # User fills come through "fill" channel
+            if self.on_trade_update:
+                try:
+                    await self.on_trade_update(data, market_id)
+                except Exception as cb_e:
+                    print(f"[{datetime.now().isoformat()}] Error in trade callback: {cb_e}")
         except Exception as e:
             print(f"[{datetime.now().isoformat()}] Error handling trade: {e}")
     
@@ -586,7 +611,7 @@ class KalshiMarketStreamer:
     # Architecture: WebSocket receives updates → Callbacks trigger → REST API executes trades
     # Based on Kalshi docs: https://docs.kalshi.com/websockets/
     
-    def get_best_bid(self, market_id: str) -> float:
+    def get_best_bid(self, market_id: str) -> Optional[float]:
         """
         Get the best bid price for a market.
         
@@ -594,7 +619,7 @@ class KalshiMarketStreamer:
             market_id: Market ticker ID
             
         Returns:
-            Best bid price as float (0-1 range)
+            Best bid price as float (0-1 range), or None if error
         """
         try:
             return self.api_client.getMarket(market_id).yes_bid
@@ -602,7 +627,7 @@ class KalshiMarketStreamer:
             print(f"[{datetime.now().isoformat()}] ⚠ Error getting best bid for {market_id}: {e}")
             return None
     
-    def get_best_ask(self, market_id: str) -> float:
+    def get_best_ask(self, market_id: str) -> Optional[float]:
         """
         Get the best ask price for a market.
         
@@ -610,7 +635,7 @@ class KalshiMarketStreamer:
             market_id: Market ticker ID
             
         Returns:
-            Best ask price as float (0-1 range)
+            Best ask price as float (0-1 range), or None if error
         """
         try:
             return self.api_client.getMarket(market_id).yes_ask
@@ -709,7 +734,7 @@ class KalshiMarketStreamer:
             print(f"[{datetime.now().isoformat()}] ✗ Error cancelling order {order_id}: {e}")
             return False
     
-    def cancel_all_orders(self, market_id: str = None) -> int:
+    def cancel_all_orders(self, market_id: Optional[str] = None) -> int:
         """
         Cancel all active orders, optionally filtered by market.
         
@@ -847,7 +872,7 @@ class KalshiMarketStreamer:
             print(f"[{datetime.now().isoformat()}] ✗ Error placing market making orders for {market_id}: {e}")
             return {'buy_order': None, 'sell_order': None}
     
-    def get_active_orders(self, market_id: str = None) -> Dict[str, Dict]:
+    def get_active_orders(self, market_id: Optional[str] = None) -> Dict[str, Dict]:
         """
         Get all active orders, optionally filtered by market.
         
@@ -876,6 +901,9 @@ class KalshiMarketStreamer:
         
         try:
             while self.running:
+                if self.ws is None:
+                    print(f"[{datetime.now().isoformat()}] ⚠ WebSocket not connected, stopping listen")
+                    break
                 try:
                     # Use a shorter timeout so we can check self.running more frequently
                     message = await asyncio.wait_for(self.ws.recv(), timeout=5.0)

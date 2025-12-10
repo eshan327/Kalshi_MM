@@ -1,6 +1,25 @@
+"""
+Basic Market Making Strategy for Kalshi prediction markets.
+
+This module implements a spread-capture strategy that:
+1. Scans markets for bid-ask spread opportunities
+2. Places buy orders slightly above the best bid
+3. Places sell orders slightly below the best ask
+4. Profits from the spread when both orders fill
+
+Usage:
+    from Strategies.basicMM import BasicMM
+    
+    mm = BasicMM(reserve_limit=10, demo=True)
+    mm.identify_market_opportunities()
+    mm.run(bankroll=1000)
+"""
+
 import sys
 import os
 import csv
+import traceback
+from typing import Any, Optional, Tuple
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -9,14 +28,7 @@ import datetime
 import asyncio
 import time
 
-''' This file:
-get markets
-identify market opportunities
-get price
-trade
-trade single
-run
-'''
+
 class BasicMM:
     def __init__(self, reserve_limit = 10, demo=False):
         self.client = KalshiAPI().get_client(demo=demo)
@@ -26,13 +38,13 @@ class BasicMM:
         self.demo = demo
         self.last_cursor = None  # Store the last cursor for pagination continuation
 
-    def get_markets(self, max_total=100000, page_size=100, status="open", start_cursor=None):
+    def get_markets(self, max_total=100000, page_size=100, status=None, start_cursor=None):
         """Fetch markets with robust pagination.
 
         Args:
             max_total: Maximum number of markets to collect
             page_size: Number of markets per request (server typically caps at 100)
-            status: Market status filter (e.g., "open", "active", "closed")
+            status: Market status filter (None to get all tradeable markets)
             start_cursor: Optional cursor to start from (for continuing pagination)
                           If None, starts from the beginning
         
@@ -101,7 +113,7 @@ class BasicMM:
 
         return MarketResponse(all_markets)
     
-    def get_next_markets(self, max_total=10000, page_size=100, status="open"):
+    def get_next_markets(self, max_total=10000, page_size=100, status=None):
         """
         Get the next batch of markets continuing from the last cursor.
         This is useful when you've already fetched markets and want to continue.
@@ -144,12 +156,12 @@ class BasicMM:
             try:
                 resting_orders = self.client.get_total_resting_order_value()
                 return balance.balance - resting_orders
-            except Exception as e:
-                print(f"Warning: Could not get resting order value: {e}")
-                return balance.balance  # Return just the balance if we can't get resting orders
+            except Exception:
+                # API may not support this endpoint - just use balance
+                return balance.balance
         except Exception as e:
             print(f"Error getting balance: {e}")
-            return 0  # Return 0 if we can't get balance
+            return 0
 
     def identify_market_opportunities(self, max_total=100000, continue_from_last=False):
         """
@@ -163,9 +175,9 @@ class BasicMM:
         
         if continue_from_last:
             print("Continuing from last cursor position...")
-            markets_response = self.get_next_markets(max_total=max_total, page_size=100, status="open")
+            markets_response = self.get_next_markets(max_total=max_total, page_size=100, status=None)
         else:
-            markets_response = self.get_markets(max_total=max_total, page_size=100, status="open")
+            markets_response = self.get_markets(max_total=max_total, page_size=100, status=None)
         
         markets = markets_response.markets if hasattr(markets_response, 'markets') else markets_response
         opportunities = []  # Will store tuples of (market, spread)
@@ -283,55 +295,29 @@ class BasicMM:
                     print(f"Error: Failed to get market data for {marketID}")
                     return None, None
             
-            # Debug: Print what we actually got
-            print(f"DEBUG get_price for {marketID}:")
-            print(f"  Market type: {type(market)}")
-            print(f"  Has yes_bid attr: {hasattr(market, 'yes_bid')}")
-            print(f"  Has yes_ask attr: {hasattr(market, 'yes_ask')}")
-            if hasattr(market, 'yes_bid'):
-                print(f"  yes_bid value: {market.yes_bid} (type: {type(market.yes_bid)})")
-            if hasattr(market, 'yes_ask'):
-                print(f"  yes_ask value: {market.yes_ask} (type: {type(market.yes_ask)})")
+            # If market is a string, we can't get attributes from it
+            if isinstance(market, str):
+                market = self.client.get_market(marketID)
+                if market is None or isinstance(market, str):
+                    return None, None
             
-            # Try to get values - use the same pattern that works in identify_market_opportunities
-            yes_bid = None
-            yes_ask = None
+            # Get bid/ask values from market object
+            yes_bid: Optional[Any] = None
+            yes_ask: Optional[Any] = None
             
-            # Method 1: Direct attribute access (like in identify_market_opportunities line 179)
+            # Try attribute access first
             if hasattr(market, 'yes_bid') and hasattr(market, 'yes_ask'):
-                try:
-                    yes_bid = market.yes_bid
-                    yes_ask = market.yes_ask
-                except AttributeError:
-                    pass
-            
-            # Method 2: getattr fallback
-            if yes_bid is None:
                 yes_bid = getattr(market, 'yes_bid', None)
-            if yes_ask is None:
                 yes_ask = getattr(market, 'yes_ask', None)
             
-            # Method 3: Try dictionary access if it's a dict
+            # Fallback to dictionary access
             if yes_bid is None and isinstance(market, dict):
                 yes_bid = market.get('yes_bid')
             if yes_ask is None and isinstance(market, dict):
                 yes_ask = market.get('yes_ask')
             
-            print(f"  Final yes_bid: {yes_bid}, yes_ask: {yes_ask}")
-            
-            # Handle case where values might be 0 (falsy but not None)
-            # 0 is not a valid price, so treat it as missing data
+            # Validate prices (0 is not a valid price)
             if yes_bid is None or yes_ask is None or yes_bid == 0 or yes_ask == 0:
-                print(f"Warning: No bid/ask prices available for market {marketID} (yes_bid={yes_bid}, yes_ask={yes_ask})")
-                # Print all non-callable attributes for debugging
-                print(f"  All market attributes:")
-                for attr in dir(market):
-                    if not attr.startswith('_') and not callable(getattr(market, attr, None)):
-                        try:
-                            value = getattr(market, attr)
-                            print(f"    {attr} = {value}")
-                        except:
-                            pass
                 return None, None
 
             # Convert to integers (prices are typically in cents, 0-100 range)
@@ -371,7 +357,6 @@ class BasicMM:
             
         except Exception as e:
             print(f"Error in get_price for market {marketID}: {e}")
-            import traceback
             traceback.print_exc()
             return None, None
 
@@ -534,7 +519,8 @@ class BasicMM:
         print(f"{'='*80}\n")
             
                 
-    async def run(self):
+    async def run_async(self):
+        """Async version of run - continuously monitors and trades."""
         bankroll = self.calculate_remaining_balance() - self.reserve_limit
         while bankroll > 0:
             self.identify_market_opportunities()

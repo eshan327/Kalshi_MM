@@ -9,9 +9,12 @@ import sys
 import os
 from datetime import datetime
 from collections import deque
+from typing import Optional, List
 
 # Add project root to path
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 from Websocket.market_streamer import KalshiMarketStreamer
 
@@ -19,7 +22,7 @@ from Websocket.market_streamer import KalshiMarketStreamer
 class InteractiveWebSocket:
     """Interactive websocket controller with command interface."""
     
-    def __init__(self, market_ids: list, demo: bool = False, channels: list = None):
+    def __init__(self, market_ids: List[str], demo: bool = False, channels: Optional[List[str]] = None):
         self.streamer = KalshiMarketStreamer(market_ids=market_ids, demo=demo, channels=channels)
         self.running = True
         self.streamer_task = None
@@ -103,7 +106,7 @@ class InteractiveWebSocket:
         await self.streamer.subscribe_to_market(market_id, channels=channels)
         print(f"[{datetime.now().isoformat()}] ✓ Subscription sent")
     
-    async def unsubscribe_channels(self, market_id: str, channels: list = None):
+    async def unsubscribe_channels(self, market_id: str, channels: Optional[List[str]] = None):
         """Unsubscribe from channels for a market."""
         # First, list subscriptions to get current SIDs
         # Note: SID tracking might not be complete, so we'll use list_subscriptions

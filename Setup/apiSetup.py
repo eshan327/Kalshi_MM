@@ -1,4 +1,31 @@
-from kalshi_python import Configuration, KalshiClient
+"""
+Kalshi API Setup and Authentication.
+
+This module provides the KalshiAPI class for connecting to Kalshi's trading API.
+It handles authentication via RSA private keys and supports both demo and 
+production environments.
+
+Usage:
+    from Setup.apiSetup import KalshiAPI
+    
+    # Production
+    client = KalshiAPI().get_client(demo=False)
+    
+    # Demo (safe testing)
+    client = KalshiAPI().get_client(demo=True)
+    
+    # Use the client
+    balance = client.get_balance()
+    markets = client.get_markets(limit=100)
+
+Configuration:
+    1. Create Setup/config.py from config_template.py
+    2. Set PRODUCTION_API_KEY_ID and/or DEMO_API_KEY_ID
+    3. Place private key files: private_key.pem, private_demo_key.pem
+"""
+
+from kalshi_python import KalshiClient
+from kalshi_python.configuration import Configuration
 import os
 import sys
 
@@ -7,21 +34,22 @@ SETUP_DIR = os.path.dirname(os.path.abspath(__file__))
 if SETUP_DIR not in sys.path:
     sys.path.insert(0, SETUP_DIR)
 
-from demo_config_template import DEMO_PRIVATE_KEY_FILE, DEMO_API_KEY_ID
-
-# Try to import production config, fallback if it doesn't exist
+# Try to import config, fallback if it doesn't exist
 PRODUCTION_API_KEY_ID = None
+DEMO_API_KEY_ID = None
 try:
-    # Ensure Setup directory is in path for import
-    if SETUP_DIR not in sys.path:
-        sys.path.insert(0, SETUP_DIR)
-    from config import PRODUCTION_API_KEY_ID
+    from config import PRODUCTION_API_KEY_ID, DEMO_API_KEY_ID
 except (ImportError, ModuleNotFoundError) as e:
-    # Fallback: try to use environment variable
+    # Fallback: try to use environment variables
     PRODUCTION_API_KEY_ID = os.environ.get("KALSHI_API_KEY_ID", None)
+    DEMO_API_KEY_ID = os.environ.get("KALSHI_DEMO_API_KEY_ID", None)
     if PRODUCTION_API_KEY_ID is None:
         print("Warning: config.py not found. Create it from config_template.py")
         print("Or set KALSHI_API_KEY_ID environment variable.")
+
+# Private key file paths
+PRODUCTION_PRIVATE_KEY_FILE = os.path.join(SETUP_DIR, "private_key.pem")
+DEMO_PRIVATE_KEY_FILE = os.path.join(SETUP_DIR, "private_demo_key.pem")
 
 
 class KalshiAPI:
@@ -58,7 +86,7 @@ class KalshiAPI:
                 if PRODUCTION_API_KEY_ID is None:
                     raise ValueError(
                         "Production API key ID not found. "
-                        "Create Setup/production_config.py from production_config_template.py "
+                        "Create Setup/config.py from config_template.py "
                         "or set KALSHI_API_KEY_ID environment variable."
                     )
                 

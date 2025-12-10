@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 """
-Universal runner for BasicMM - choose between demo and production environments
+Universal Launcher for Kalshi Market Making Bot.
+
+This script provides a unified entry point for running the BasicMM market maker
+in either demo or production mode.
+
+Usage:
+    # Interactive mode (prompts for environment choice)
+    python run_universal.py
+    
+    # Command line mode
+    python run_universal.py demo        # Safe testing with demo API
+    python run_universal.py production  # Real trading (use with caution!)
+    
+    # Shorthand options
+    python run_universal.py d           # demo
+    python run_universal.py p           # production
+    python run_universal.py --demo
+    python run_universal.py --prod
 """
 
 import sys
@@ -98,7 +115,10 @@ def main():
         # Run single iteration (non-async)
         print("\nRunning single trading iteration...")
         try:
-            mm.run()
+            # Calculate bankroll from balance minus reserve
+            bankroll = balance.balance - mm.reserve_limit
+            print(f"Trading with bankroll: ${bankroll / 100:.2f}")
+            mm.run(bankroll)
             print(f"\n{env_name} run completed successfully!")
             
             # Check if log file was created

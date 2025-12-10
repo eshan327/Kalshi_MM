@@ -1,6 +1,6 @@
 import json
 import argparse
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -15,19 +15,22 @@ def setup_client():
     api = KalshiAPI()
     return api.get_client()
 
-def get_markets(client, limit: int = None, status: str = "open", max_markets: int = None) -> List[Dict[str, Any]]:
-    """Get markets from Kalshi API with pagination support."""
+def get_markets(client, limit: Optional[int] = None, status: Optional[str] = None, max_markets: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Get markets from Kalshi API with pagination support.
+    
+    Note: status parameter is ignored due to SDK validation issues.
+    All markets are fetched and can be filtered client-side.
+    """
     try:
         all_markets = []
         cursor = None
         batch_size = 1000  # Maximum per request
         
-        print(f"Fetching {status} markets from Kalshi...")
+        print(f"Fetching markets from Kalshi...")
         
         while True:
-            # Prepare parameters
+            # Prepare parameters - don't pass status due to SDK enum validation issues
             params = {
-                "status": status,
                 "limit": min(batch_size, limit) if limit else batch_size
             }
             
@@ -242,8 +245,6 @@ def main():
     """Main function to get markets and sort by spread."""
     parser = argparse.ArgumentParser(description="Get Kalshi markets sorted by highest spread")
     parser.add_argument("--limit", type=int, help="Number of markets to fetch (default: all active markets)")
-    parser.add_argument("--status", type=str, default="open", choices=["open", "closed", "active"], 
-                       help="Market status to fetch (default: open)")
     parser.add_argument("--sort-by", choices=["percentage", "absolute"], default="percentage", 
                        help="Sort by percentage or absolute spread in cents (default: percentage)")
     parser.add_argument("--output", type=str, default="markets_by_spread.json", 
@@ -268,8 +269,8 @@ def main():
         print(f"Error setting up client: {e}")
         return
     
-    # Get markets
-    markets = get_markets(client, limit=limit, status=args.status)
+    # Get markets (status filter removed due to SDK issues)
+    markets = get_markets(client, limit=limit)
     
     if not markets:
         print("No markets found or error occurred.")

@@ -1,252 +1,250 @@
-# Kalshi Scraper & Market Making Bot
+# Kalshi Market Making Bot
 
-A Python-based trading automation system for Kalshi prediction markets that includes API integration, scraping, and automated market making strategies.
+A Python-based automated trading system for [Kalshi](https://kalshi.com) prediction markets. Features market analysis, real-time WebSocket streaming, and automated market making strategies.
 
 ## Features
 
-- **Kalshi API Integration**: Direct HTTP and WebSocket connections to Kalshi's trading API
-- **Market Making Bot**: Automated trading bot that identifies spread opportunities and places limit orders
-- **Web Scraping**: Selenium-based market data extraction and order placement
-- **Trading Simulation**: Built-in simulator for backtesting strategies with P&L tracking
-- **Real-time Data**: WebSocket connections for live market updates
-- **Order Management**: Comprehensive order tracking and fill detection
-- **Visualization**: Matplotlib charts for balance history and profit/loss analysis
+- **Market Analysis**: Scan thousands of markets for spread opportunities
+- **Real-time Data**: WebSocket streaming for live orderbook and trade updates
+- **Market Making**: Automated bid/ask placement to capture spreads
+- **Web Dashboard**: Flask-based UI for monitoring markets in real-time
+- **Dual Environment**: Support for both demo and production trading
+
+## Quick Start
+
+```bash
+# 1. Clone and install dependencies
+git clone https://github.com/eshan327/Kalshi_MM.git
+cd Kalshi_MM
+pip install -r requirements.txt
+
+# 2. Set up credentials (see Setup section below)
+cp Setup/config_template.py Setup/config.py
+# Edit Setup/config.py with your API credentials
+
+# 3. Run the universal launcher
+python Setup/run_universal.py demo    # Safe testing mode
+python Setup/run_universal.py prod    # Production (real money!)
+```
 
 ## Project Structure
 
 ```
-kalshi_scraper/
-├── main.py              # Main API client demo
-├── getData.py           # Market data fetcher sorted by spread
-├── clients.py           # Kalshi HTTP/WebSocket API clients
-├── scraper.py           # Basic market data scraper
-├── scraper2.py          # Trading simulator
-├── scraper3.py          # Full market making bot with order management
-├── requirements.txt     # Python dependencies
-├── caleb/              # Additional trading utilities
-│   ├── trader.py       # Limit order balancing logic
-│   ├── trade.py        # Chrome automation helper
-│   └── openChromeWindows.py # Chrome debugging setup
-└── config/             # Configuration files
-    └── settings.py     # Trading parameters
+Kalshi_MM/
+├── Setup/                      # Configuration & API setup
+│   ├── apiSetup.py            # KalshiAPI client wrapper
+│   ├── config_template.py     # Template for credentials
+│   ├── config.py              # Your credentials (gitignored)
+│   └── run_universal.py       # Universal launcher script
+│
+├── Strategies/                 # Trading strategies
+│   └── basicMM.py             # Market maker (spread detection + trading)
+│
+├── Getdata/                    # Market data utilities
+│   ├── getData.py             # Fetch & sort markets by spread
+│   ├── filterMarkets.py       # Filter markets by type/volume
+│   └── orderBookListener.py   # Monitor orderbook changes
+│
+├── Websocket/                  # Real-time streaming
+│   ├── market_streamer.py     # WebSocket client for live data
+│   └── websocket_interactive.py # Interactive CLI for streaming
+│
+├── WebsocketApp/               # Web dashboard
+│   ├── app.py                 # Flask application
+│   ├── websocket_handler.py   # WebSocket-to-Flask bridge
+│   ├── templates/             # HTML templates
+│   └── static/                # CSS/JS assets
+│
+├── visualize_orderbook.py     # Orderbook visualization tool
+├── requirements.txt           # Python dependencies
+├── data/                      # Output data (gitignored)
+└── logs/                      # Trade logs (gitignored)
 ```
 
-## Installation
+## Setup
 
-1. **Clone the repository (SSH)**
-   ```bash
-   git clone git@github.com:eshan327/Kalshi_MM.git
-   cd kalshi_scraper
-   ```
+### 1. Install Dependencies
 
-2. **Create a virtual environment**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate
-   ```
+```bash
+pip install -r requirements.txt
+```
 
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+### 2. Configure API Credentials
 
-4. **Set up environment variables**
-   Create a `.env` file in the project root:
-   ```env
-   DEMO_KEYID=
-   DEMO_KEYFILE=
-   PROD_KEYID=
-   PROD_KEYFILE=
-   ```
+1. Get your API credentials from [Kalshi](https://kalshi.com) (Settings → API Keys)
+2. Create your config file:
 
-5. **Configure trading parameters**
-   Create a `config.ini` file, and fill in each field:
-   ```ini
-   [Credentials]
-   username =
-   password =
+```bash
+cp Setup/config_template.py Setup/config.py
+```
 
-   [Trading]
-   max_position =
-   max_capital =
-   url =
-   ```
+3. Edit `Setup/config.py` with your credentials:
+
+```python
+PRODUCTION_API_KEY_ID = "your-api-key-id-here"
+DEMO_API_KEY_ID = "your-demo-api-key-id-here"  # Optional
+```
+
+4. Place your private key files in `Setup/`:
+   - Production: `Setup/private_key.pem`
+   - Demo: `Setup/private_demo_key.pem`
+
+### 3. Verify Setup
+
+```bash
+python Setup/run_universal.py demo
+# Should display account balance and market opportunities
+```
 
 ## Usage
 
-### Market Data Analysis
+### Universal Launcher (Recommended)
 
-Get markets sorted by highest spread:
 ```bash
-python getData.py --limit 100 --sort-by percentage --top 20
+# Interactive mode
+python Setup/run_universal.py
+
+# Command line mode
+python Setup/run_universal.py demo        # Demo environment
+python Setup/run_universal.py production  # Production (real money!)
 ```
 
-Available options:
-- `--limit`: Number of markets to fetch (default: 100)
-- `--sort-by`: Sort by "percentage" or "absolute" spread (default: percentage)
-- `--top`: Show only top N markets by spread
-- `--output`: Output JSON filename (default: markets_by_spread.json)
+### Find Trading Opportunities
 
-Example output:
 ```bash
-python getData.py --limit 50 --top 10 --output top_spreads.json
+python Strategies/basicMM.py
 ```
 
-### API Connection Test
+This will:
+1. Fetch all active markets
+2. Identify opportunities with spread > 3% and volume > 1000
+3. Save results to `data/marketData/`
 
-Test the Kalshi API connection and get account balance:
+### Get Markets by Spread
+
 ```bash
-python main.py
+python Getdata/getData.py --top 20
+python Getdata/getData.py --limit 100 --top 10 --output my_markets.json
 ```
 
-Expected output:
-```
-Balance: {'balance': 1000.00}
-WebSocket connection opened.
-Received message: {"type": "ticker_update", "data": {...}}
-```
+### Real-time WebSocket Streaming
 
-### Market Making Bot
-
-Run the latest market scraper to monitor bid-ask spreads, backtest strategies, and run the full bot with live trading:
 ```bash
-python scraper3.py
+# Stream a specific market
+python Websocket/market_streamer.py --market-id KXBTC-25JAN03-T98500
+
+# Interactive mode
+python Websocket/websocket_interactive.py --market-id KXBTC-25JAN03-T98500
+
+# Demo environment
+python Websocket/market_streamer.py --market-id KXBTC-25JAN03-T98500 --demo
 ```
 
-**Warning**: `scraper3.py` places real orders on Kalshi. Use with caution and start with small position limits.
+### Web Dashboard
+
+```bash
+cd WebsocketApp
+python app.py
+# Open http://localhost:5001
+```
+
+## Trading Strategy
+
+The `basicMM.py` market maker uses a spread capture strategy:
+
+1. **Scan**: Find markets with bid-ask spread > 3% and volume > 1000
+2. **Quote**: Place buy order at `bid + 1¢`, sell order at `ask - 1¢`
+3. **Capture**: Profit from the spread when both orders fill
+
+**Example:**
+```
+Market: "Will BTC exceed $98,500?"
+Current: Bid 45¢ / Ask 52¢ (7¢ spread)
+Bot places: Buy @ 46¢, Sell @ 51¢
+Potential profit: 5¢ per contract
+```
 
 ## Configuration
 
-### Trading Strategy Parameters
+Edit `Strategies/basicMM.py` to adjust parameters:
 
-The market making bot uses the following default settings:
+```python
+# In BasicMM.__init__():
+reserve_limit = 10      # Keep $10 in reserve
+demo = False            # True for demo environment
 
-- **Spread Threshold**: 3¢ minimum bid-ask spread to trigger trades
-- **Position Limit**: 1 open contract maximum
-- **Capital**: $1000 starting balance
-- **Sell Timing**: Random intervals between 10-15 seconds
-- **Markets**: First 3 contracts in the target market group
-
-### Risk Management
-
-- Position limits prevent over-exposure
-- Real-time P&L tracking
-- Order fill confirmation before placing new orders
+# In filter_market_opportunities():
+min_spread = 0.03       # Minimum 3% spread
+min_volume = 1000       # Minimum volume
+max_spread = 0.10       # Maximum 10% spread
+```
 
 ## API Reference
 
-### KalshiHttpClient
+### KalshiAPI
 
 ```python
-from clients import KalshiHttpClient, Environment
+from Setup.apiSetup import KalshiAPI
 
-client = KalshiHttpClient(
-    key_id="your_key_id",
-    private_key=private_key,
-    environment=Environment.DEMO  # or Environment.PROD
-)
-
-# Get account balance
+client = KalshiAPI().get_client(demo=False)
 balance = client.get_balance()
-
-# Get market trades
-trades = client.get_trades(ticker="PRES-24")
+markets = client.get_markets(limit=100)
 ```
 
-### KalshiWebSocketClient
+### BasicMM
 
 ```python
-from clients import KalshiWebSocketClient
+from Strategies.basicMM import BasicMM
 
-ws_client = KalshiWebSocketClient(
-    key_id="your_key_id", 
-    private_key=private_key,
-    environment=Environment.DEMO
-)
-
-# Connect and subscribe to ticker updates
-await ws_client.connect()
+mm = BasicMM(reserve_limit=10, demo=True)
+mm.identify_market_opportunities()
+print(f"Found {len(mm.market_opportunities)} opportunities")
 ```
 
-## Market Making Strategy
+## Data Output
 
-The bot implements a simple market making strategy:
+| Type | Location | Format |
+|------|----------|--------|
+| Market opportunities | `data/marketData/` | CSV |
+| Orderbook snapshots | `data/orderbookData/` | JSON |
+| Trade logs | `logs/trade_logs/` | LOG |
+| Price data | `WebsocketApp/data/` | JSON |
 
-1. **Scan Markets**: Monitor bid-ask spreads across target contracts
-2. **Identify Opportunities**: Look for spreads ≥ 3¢
-3. **Place Orders**: Submit limit orders at improved prices
-4. **Manage Risk**: Limit open positions and capital exposure
-5. **Take Profits**: Sell positions at predetermined intervals
+## Demo vs Production
 
-### Example Trade Flow
-
-```
-Market: "Will NYC's highest temperature today exceed 85°F?"
-Yes Contract: Bid 43¢, Ask 49¢ (6¢ spread)
-Bot Action: Bid 44¢, Ask 48¢ (4¢ potential profit)
-```
-
-## Output & Monitoring
-
-### Console Output
-- Real-time market data and spread analysis
-- Order placement and fill confirmations
-- Position and balance updates
-- P&L calculations
-
-### Generated Files
-- `plots/trading_balance_history.png` - Account balance over time
-- `plots/trading_profit_history.png` - Cumulative profit/loss
-- Trading summary with win rates and statistics
-
-## Browser Requirements
-
-For functionality:
-- **Firefox**: Default browser for Selenium automation
-- **Chrome**: Alternative browser with debugging support, may break
-- **WebDriver**: Automatically managed by webdriver-manager
-
-## Security Considerations
-
-- **API Keys**: Store securely in `.env` file (never commit to git)
-- **Private Keys**: Use separate demo/prod key files
-- **2FA**: Supported for manual login flows
-- **Rate Limiting**: Built-in API rate limiting (100ms between calls)
+| Feature | Demo | Production |
+|---------|------|------------|
+| API URL | demo-api.kalshi.co | api.elections.kalshi.com |
+| Real money | No | Yes |
+| Credentials | DEMO_API_KEY_ID | PRODUCTION_API_KEY_ID |
 
 ## Troubleshooting
 
-### Common Issues
+| Error | Solution |
+|-------|----------|
+| "Private key file not found" | Ensure `Setup/private_key.pem` exists |
+| "API key ID not found" | Create `Setup/config.py` from template |
+| WebSocket won't connect | Check credentials, try `--demo` flag |
+| "Invalid status filter" | Pass `status=None` to `get_markets()` |
 
-1. **Login Failures**
-   - Verify credentials in `config.ini`
-   - Check for 2FA requirements
-   - Ensure browser automation permissions
+## Safety Warnings
 
-2. **Order Placement Errors**
-   - Confirm market is active and tradeable
-   - Check position limits and available capital
-   - Verify WebDriver compatibility
+⚠️ **This bot trades real money in production mode.**
 
-3. **API Connection Issues**
-   - Validate API keys and private key files
-   - Check network connectivity
-   - Verify environment settings (DEMO vs PROD)
-
-### Debug Mode
-
-Enable verbose logging by setting environment variable, e.g.
-```bash
-export DEBUG=1
-python scraper3.py
-```
+- Always test in demo mode first
+- Start with small positions
+- Monitor your positions actively
+- Set appropriate reserve limits
+- Review code before running in production
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Submit a pull request
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License - Use at your own risk.
