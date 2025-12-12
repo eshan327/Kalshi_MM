@@ -215,15 +215,33 @@ def find_opportunities():
         print(f"Total markets analyzed: {len(mm.market_opportunities)}")
         print(f"Total opportunities identified: {len(mm.market_opportunities)}")
         
-        # Call filter_market_opportunities with default parameters (matching main method)
-        print("\nFiltering for markets with good volume and spread >= 3 cents...")
+        # Check if NFL filter is requested
+        filter_nfl = data.get('filter_nfl', False)
+        
+        # Call appropriate filter method with default parameters (matching main method)
+        if filter_nfl:
+            print("\nFiltering for NFL markets with good volume and spread >= 3 cents...")
+            filter_method = mm.filter_nfl
+        else:
+            print("\nFiltering for markets with good volume and spread >= 3 cents...")
+            filter_method = mm.filter_market_opportunities
+        
         try:
-            filtered = mm.filter_market_opportunities(
-                min_spread=0.03,  # 3 cents spread minimum
-                min_volume=1000,  # Good volume threshold
-                max_spread=0.1,   # Maximum spread
-                min_price=0.1     # Minimum price
-            )
+            # For NFL filter, don't require volume; for regular filter, use 1000 volume threshold
+            if filter_nfl:
+                filtered = filter_method(
+                    min_spread=0.03,  # 3 cents spread minimum
+                    min_volume=0,     # No volume requirement for NFL
+                    max_spread=0.1,   # Maximum spread
+                    min_price=0.1     # Minimum price
+                )
+            else:
+                filtered = filter_method(
+                    min_spread=0.03,  # 3 cents spread minimum
+                    min_volume=1000,  # Good volume threshold
+                    max_spread=0.1,   # Maximum spread
+                    min_price=0.1     # Minimum price
+                )
         except Exception as filter_error:
             import traceback
             print(f"Error in filter_market_opportunities: {filter_error}")

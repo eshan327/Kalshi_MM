@@ -65,19 +65,19 @@ class BasicMM:
 
                 # Try using SDK first
                 try:
-                response = self.client.get_markets(**params)
+                    response = self.client.get_markets(**params)
                     consecutive_errors = 0  # Reset error counter on success
 
-                if hasattr(response, 'markets') and response.markets:
-                    all_markets.extend(response.markets)
+                    if hasattr(response, 'markets') and response.markets:
+                        all_markets.extend(response.markets)
                         page_count += 1
                         # Print progress every 10 pages
                         if page_count % 10 == 0:
                             print(f"Fetched {len(all_markets)} markets so far (page {page_count}, {skipped_markets} markets skipped due to errors)...")
                     
                         # Get cursor for next page
-                if hasattr(response, 'cursor') and response.cursor:
-                    cursor = response.cursor
+                        if hasattr(response, 'cursor') and response.cursor:
+                            cursor = response.cursor
                             self.last_cursor = cursor
                         else:
                             self.last_cursor = None
@@ -158,10 +158,10 @@ class BasicMM:
                                 
                                 # Continue to next iteration with updated cursor
                                 continue
-                else:
+                            else:
                                 # No more markets
                                 self.last_cursor = None
-                    break
+                                break
 
                         except Exception as http_error:
                             print(f"Raw HTTP request also failed: {http_error}")
@@ -200,7 +200,7 @@ class BasicMM:
         if max_total is None:
             print(f"Successfully fetched ALL {len(all_markets)} available markets from Kalshi")
         else:
-        print(f"Successfully fetched {len(all_markets)} valid markets")
+            print(f"Successfully fetched {len(all_markets)} valid markets")
         if self.last_cursor:
             print(f"Last cursor stored. Use get_next_markets() to continue from here.")
 
@@ -295,7 +295,7 @@ class BasicMM:
                     spread = (market.yes_ask - market.yes_bid) / 100.0
                 else:
                     # Prices are already in probability format
-                spread = market.yes_ask - market.yes_bid
+                    spread = market.yes_ask - market.yes_bid
             
             volume = getattr(market, 'volume', 0) or 0
             if spread > 0.03 and volume > 1000:
@@ -427,9 +427,9 @@ class BasicMM:
             
             # Method 2: getattr fallback
             if yes_bid is None:
-        yes_bid = getattr(market, 'yes_bid', None)
+                yes_bid = getattr(market, 'yes_bid', None)
             if yes_ask is None:
-        yes_ask = getattr(market, 'yes_ask', None)
+                yes_ask = getattr(market, 'yes_ask', None)
 
             # Method 3: Try dictionary access if it's a dict
             if yes_bid is None and isinstance(market, dict):
@@ -452,12 +452,12 @@ class BasicMM:
                             print(f"    {attr} = {value}")
                         except:
                             pass
-            return None, None
+                return None, None
 
             # Convert to integers (prices are typically in cents, 0-100 range)
             try:
-        base_buy_price = int(yes_bid)
-        base_sell_price = int(yes_ask)
+                base_buy_price = int(yes_bid)
+                base_sell_price = int(yes_ask)
             except (ValueError, TypeError) as e:
                 print(f"Error: Invalid price format for market {marketID} (yes_bid={yes_bid}, yes_ask={yes_ask}): {e}")
                 return None, None
@@ -466,28 +466,28 @@ class BasicMM:
             if not (0 <= base_buy_price <= 100) or not (0 <= base_sell_price <= 100):
                 print(f"Warning: Prices out of valid range for market {marketID} (bid={base_buy_price}, ask={base_sell_price})")
                 return None, None
-        
-        # For market making: place orders slightly inside the spread to get filled first
-        # Buy at bid + 1 cent (to outbid others and get filled first)
-        # Sell at ask - 1 cent (to undercut others and get filled first)
-        buy_price_cents = base_buy_price + 1
-        sell_price_cents = base_sell_price - 1
-        
-        # Ensure prices are within valid range (1-99 cents) for the API
-        buy_price_cents = max(1, min(99, buy_price_cents))
-        sell_price_cents = max(1, min(99, sell_price_cents))
-        
-        # Ensure we don't cross the spread (buy price should be < sell price)
-        if buy_price_cents >= sell_price_cents:
-            # If prices would cross, use the mid-price approach
-            mid_price = (base_buy_price + base_sell_price) // 2
-            buy_price_cents = max(1, min(99, mid_price - 1))
-            sell_price_cents = max(1, min(99, mid_price + 1))
-            # Ensure buy < sell
+            
+            # For market making: place orders slightly inside the spread to get filled first
+            # Buy at bid + 1 cent (to outbid others and get filled first)
+            # Sell at ask - 1 cent (to undercut others and get filled first)
+            buy_price_cents = base_buy_price + 1
+            sell_price_cents = base_sell_price - 1
+            
+            # Ensure prices are within valid range (1-99 cents) for the API
+            buy_price_cents = max(1, min(99, buy_price_cents))
+            sell_price_cents = max(1, min(99, sell_price_cents))
+            
+            # Ensure we don't cross the spread (buy price should be < sell price)
             if buy_price_cents >= sell_price_cents:
-                buy_price_cents = max(1, sell_price_cents - 1)
-        
-        return buy_price_cents, sell_price_cents
+                # If prices would cross, use the mid-price approach
+                mid_price = (base_buy_price + base_sell_price) // 2
+                buy_price_cents = max(1, min(99, mid_price - 1))
+                sell_price_cents = max(1, min(99, mid_price + 1))
+                # Ensure buy < sell
+                if buy_price_cents >= sell_price_cents:
+                    buy_price_cents = max(1, sell_price_cents - 1)
+            
+            return buy_price_cents, sell_price_cents
             
         except Exception as e:
             print(f"Error in get_price for market {marketID}: {e}")
@@ -698,14 +698,14 @@ class BasicMM:
 
                 # Cancel any partial orders if one failed
                 try:
-                if buy_order:
+                    if buy_order:
                             order_id = (getattr(buy_order, 'order_id', None) or 
                                     getattr(buy_order, 'id', None) or 
                                     getattr(buy_order, 'orderId', None))
                             if order_id:
                                 self.client.cancel_order(order_id)
                                 print(f"  Cancelled buy order {order_id}")
-                if sell_order:
+                    if sell_order:
                             order_id = (getattr(sell_order, 'order_id', None) or 
                                     getattr(sell_order, 'id', None) or 
                                     getattr(sell_order, 'orderId', None))
@@ -903,7 +903,7 @@ class BasicMM:
         
         return filtered_opportunities
 
-    def filter_nfl(self, min_spread=0.03, min_volume=1000, max_spread=0.1, min_price=0.1, 
+    def filter_nfl(self, min_spread=0.03, min_volume=0, max_spread=0.1, min_price=0.1, 
                    min_days_until_resolution=None, max_days_until_resolution=None):
         """
         Filter market opportunities by various criteria including resolution date.
@@ -911,7 +911,7 @@ class BasicMM:
         
         Args:
             min_spread: Minimum spread threshold
-            min_volume: Minimum volume threshold
+            min_volume: Minimum volume threshold (default 0, no volume requirement)
             max_spread: Maximum spread threshold
             min_price: Minimum bid/ask price
             min_days_until_resolution: Minimum days until market closes/resolves (filters out markets closing too soon)
@@ -1033,11 +1033,6 @@ class BasicMM:
             print(f"  Order ID: {sell_order.order_id}")
 
 if __name__ == "__main__":
-    import sys
-    
-    # Check if NFL filter is requested via command line argument
-    filter_nfl = len(sys.argv) > 1 and sys.argv[1].lower() in ['nfl', '--nfl', '-nfl']
-    
     mm = BasicMM(reserve_limit=10)
     
     # Identify market opportunities from ALL markets on Kalshi
@@ -1049,22 +1044,13 @@ if __name__ == "__main__":
     print(f"Total opportunities identified: {len(mm.market_opportunities)}")
         
     # Filter for markets with good volume and spread of at least 3 cents (0.03)
-    if filter_nfl:
-        print("\nFiltering for NFL markets with good volume and spread >= 3 cents...")
-        filtered = mm.filter_nfl(
-            min_spread=0.03,  # 3 cents spread minimum
-            min_volume=1000,  # Good volume threshold
-            max_spread=0.1,   # Maximum spread
-            min_price=0.1     # Minimum price
-        )
-    else:
-        print("\nFiltering for markets with good volume and spread >= 3 cents...")
-        filtered = mm.filter_market_opportunities(
-            min_spread=0.03,  # 3 cents spread minimum
-            min_volume=1000,  # Good volume threshold
-            max_spread=0.1,   # Maximum spread
-            min_price=0.1     # Minimum price
-        )
+    print("\nFiltering for markets with good volume and spread >= 3 cents...")
+    filtered = mm.filter_market_opportunities(
+        min_spread=0.03,  # 3 cents spread minimum
+        min_volume=1000,  # Good volume threshold
+        max_spread=0.1,   # Maximum spread
+        min_price=0.1     # Minimum price
+    )
     
     print(f"\n{'='*100}")
     print(f"MARKET OPPORTUNITIES (Volume >= 1000, Spread >= 3 cents)")
@@ -1111,6 +1097,6 @@ if __name__ == "__main__":
             print(f"{market_id_display:<50} {title_display:<40} {spread_str:<10} {volume:<12,} {yes_bid_str:<10} {yes_ask_str:<10}")
         
         print(f"\n{'='*100}")
-                            else:
+    else:
         print("No market opportunities found matching the criteria (Volume >= 1000, Spread >= 3 cents)")
         print(f"{'='*100}")

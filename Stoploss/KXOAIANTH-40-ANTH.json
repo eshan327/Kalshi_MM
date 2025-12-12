@@ -1,0 +1,13 @@
+{
+  "market_id": "KXOAIANTH-40-ANTH",
+  "stop_loss_cents": 5,
+  "buy_price_cents": 69,
+  "sell_price_cents": 24,
+  "buy_stop_loss_price": 29,
+  "sell_stop_loss_price": 64,
+  "contracts": 1,
+  "buy_order_id": null,
+  "sell_order_id": null,
+  "created_at": "2025-12-12T16:18:04.444259",
+  "active": true
+}

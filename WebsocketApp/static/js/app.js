@@ -774,6 +774,7 @@ class KalshiDashboard {
     setupMarketMaker() {
         // Find Opportunities Section
         const findBtn = document.getElementById('find-opportunities-btn');
+        const findNflBtn = document.getElementById('find-nfl-opportunities-btn');
         const opportunitiesStatusDiv = document.getElementById('opportunities-status');
         const opportunitiesListDiv = document.getElementById('opportunities-list');
         
@@ -784,7 +785,7 @@ class KalshiDashboard {
         const startMMBtn = document.getElementById('start-market-maker-btn');
         const mmStatusDiv = document.getElementById('market-maker-status');
         
-        if (!findBtn || !marketSelect || !mmBankrollInput || !mmStopLossInput || !startMMBtn) return;
+        if (!findBtn || !findNflBtn || !marketSelect || !mmBankrollInput || !mmStopLossInput || !startMMBtn) return;
         
         // Update market select when subscribed markets change
         this.updateMarketMakerSelect = () => {
@@ -817,7 +818,11 @@ class KalshiDashboard {
         
         // Find Opportunities button handler (standalone, no requirements)
         findBtn.addEventListener('click', () => {
-            this.findMarketOpportunities(opportunitiesStatusDiv, opportunitiesListDiv);
+            this.findMarketOpportunities(opportunitiesStatusDiv, opportunitiesListDiv, false);
+        });
+        
+        findNflBtn.addEventListener('click', () => {
+            this.findMarketOpportunities(opportunitiesStatusDiv, opportunitiesListDiv, true);
         });
         
         // Market Maker Controls button handlers
@@ -842,28 +847,38 @@ class KalshiDashboard {
         this.updateMarketMakerSelect();
     }
     
-    findMarketOpportunities(statusDiv, listDiv) {
+    findMarketOpportunities(statusDiv, listDiv, filterNfl = false) {
         // Show loading status with spinner
-        statusDiv.innerHTML = '<div class="loading-container"><div class="spinner"></div><span>Finding market opportunities from ALL markets on Kalshi... This may take several minutes. Please wait...</span></div>';
+        const searchType = filterNfl ? 'NFL' : 'market';
+        statusDiv.innerHTML = `<div class="loading-container"><div class="spinner"></div><span>Finding ${searchType} opportunities from ALL markets on Kalshi... This may take several minutes. Please wait...</span></div>`;
         statusDiv.className = 'opportunities-status info';
         listDiv.style.display = 'none';
         
-        // Disable button during loading
+        // Disable buttons during loading
         const findBtn = document.getElementById('find-opportunities-btn');
+        const findNflBtn = document.getElementById('find-nfl-opportunities-btn');
         const originalBtnText = findBtn.textContent;
+        const originalNflBtnText = findNflBtn.textContent;
         findBtn.disabled = true;
+        findNflBtn.disabled = true;
         findBtn.textContent = 'Searching...';
+        findNflBtn.textContent = 'Searching...';
         
         // Log the action
-        this.addLog('info', 'Finding market opportunities from ALL markets on Kalshi (this may take several minutes)...');
+        const logMessage = filterNfl 
+            ? 'Finding NFL market opportunities from ALL markets on Kalshi (this may take several minutes)...'
+            : 'Finding market opportunities from ALL markets on Kalshi (this may take several minutes)...';
+        this.addLog('info', logMessage);
         
-        // Call backend API (no parameters needed)
+        // Call backend API with filter_nfl parameter
         fetch('/api/find-opportunities', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({})
+            body: JSON.stringify({
+                filter_nfl: filterNfl
+            })
         })
         .then(response => {
             // Check if response is ok
@@ -878,16 +893,19 @@ class KalshiDashboard {
             return response.json();
         })
         .then(data => {
-            // Re-enable button
+            // Re-enable buttons
             findBtn.disabled = false;
+            findNflBtn.disabled = false;
             findBtn.textContent = originalBtnText;
+            findNflBtn.textContent = originalNflBtnText;
             
             if (data.success) {
                 const count = data.opportunities ? data.opportunities.length : 0;
-                statusDiv.textContent = `Found ${count} market opportunities`;
+                const marketType = filterNfl ? 'NFL' : 'market';
+                statusDiv.textContent = `Found ${count} ${marketType} opportunities`;
                 statusDiv.className = 'opportunities-status success';
                 this.displayOpportunities(data.opportunities || [], listDiv);
-                this.addLog('success', `Found ${count} market opportunities from all markets`);
+                this.addLog('success', `Found ${count} ${marketType} opportunities from all markets`);
             } else {
                 const errorMsg = data.error || 'Failed to find opportunities';
                 statusDiv.textContent = `Error: ${errorMsg}`;
@@ -896,9 +914,11 @@ class KalshiDashboard {
             }
         })
         .catch(error => {
-            // Re-enable button on error
+            // Re-enable buttons on error
             findBtn.disabled = false;
+            findNflBtn.disabled = false;
             findBtn.textContent = originalBtnText;
+            findNflBtn.textContent = originalNflBtnText;
             
             const errorMsg = error.message || 'Network error or server timeout';
             statusDiv.textContent = `Error: ${errorMsg}`;
