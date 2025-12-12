@@ -1,25 +1,8 @@
-"""
-Basic Market Making Strategy for Kalshi prediction markets.
-
-This module implements a spread-capture strategy that:
-1. Scans markets for bid-ask spread opportunities
-2. Places buy orders slightly above the best bid
-3. Places sell orders slightly below the best ask
-4. Profits from the spread when both orders fill
-
-Usage:
-    from Strategies.basicMM import BasicMM
-    
-    mm = BasicMM(reserve_limit=10, demo=True)
-    mm.identify_market_opportunities()
-    mm.run(bankroll=1000)
-"""
-
 import sys
 import os
 import csv
-import traceback
-from typing import Any, Optional, Tuple
+import requests
+import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -28,7 +11,14 @@ import datetime
 import asyncio
 import time
 
-
+''' This file:
+get markets
+identify market opportunities
+get price
+trade
+trade single
+run
+'''
 class BasicMM:
     def __init__(self, reserve_limit = 10, demo=False):
         self.client = KalshiAPI().get_client(demo=demo)
@@ -38,13 +28,13 @@ class BasicMM:
         self.demo = demo
         self.last_cursor = None  # Store the last cursor for pagination continuation
 
-    def get_markets(self, max_total=100000, page_size=100, status=None, start_cursor=None):
+    def get_markets(self, max_total=100000, page_size=100, status="open", start_cursor=None):
         """Fetch markets with robust pagination.
 
         Args:
             max_total: Maximum number of markets to collect. If None, fetches all available markets.
             page_size: Number of markets per request (server typically caps at 100)
-            status: Market status filter (None to get all tradeable markets)
+            status: Market status filter (e.g., "open", "active", "closed")
             start_cursor: Optional cursor to start from (for continuing pagination)
                           If None, starts from the beginning
         
@@ -55,66 +45,162 @@ class BasicMM:
         # Use provided cursor, or None to start from beginning
         cursor = start_cursor
         page_count = 0
+        effective_page_size = min(page_size, 100)
+
         consecutive_errors = 0
-        max_consecutive_errors = 10  # Stop after too many consecutive errors
+        max_consecutive_errors = 10  # Allow more errors before giving up
+        skipped_markets = 0
+        
+        # Get base URL for raw HTTP requests (fallback when SDK fails)
+        config = self.client.api_client.configuration
+        base_url = config.host
 
         while True:
             try:
-                params = {"limit": min(page_size, 100)}
+                params = {"limit": effective_page_size}
                 if status is not None:
                     params["status"] = status
                 if cursor:
                     params["cursor"] = cursor
 
-                response = self.client.get_markets(**params)
-                consecutive_errors = 0  # Reset error counter on success
+                # Try using SDK first
+                try:
+                    response = self.client.get_markets(**params)
+                    consecutive_errors = 0  # Reset error counter on success
 
-                if hasattr(response, 'markets') and response.markets:
-                    all_markets.extend(response.markets)
-                    page_count += 1
-                    # Print progress every 10 pages
-                    if page_count % 10 == 0:
-                        print(f"Fetched {len(all_markets)} markets so far (page {page_count})...")
-                else:
-                    # No more markets
-                    self.last_cursor = None
-                    break
+                    if hasattr(response, 'markets') and response.markets:
+                        all_markets.extend(response.markets)
+                        page_count += 1
+                        # Print progress every 10 pages
+                        if page_count % 10 == 0:
+                            print(f"Fetched {len(all_markets)} markets so far (page {page_count}, {skipped_markets} markets skipped due to errors)...")
+                    
+                        # Get cursor for next page
+                        if hasattr(response, 'cursor') and response.cursor:
+                            cursor = response.cursor
+                            self.last_cursor = cursor
+                        else:
+                            self.last_cursor = None
+                            break
+                    else:
+                        # No more markets
+                        self.last_cursor = None
+                        break
 
-                # Continue pagination if a cursor is provided
-                if hasattr(response, 'cursor') and response.cursor:
-                    cursor = response.cursor
-                    # Store the cursor for next time
-                    self.last_cursor = cursor
-                else:
-                    # No more pages
-                    self.last_cursor = None
-                    break
+                except Exception as api_error:
+                    # Handle validation errors from API (e.g., invalid market statuses like 'inactive')
+                    error_str = str(api_error)
+                    if "validation error" in error_str.lower() or "must be one of enum values" in error_str.lower():
+                        consecutive_errors += 1
+                        print(f"Warning: Validation error on page {page_count + 1} (invalid market data). Using raw HTTP to extract cursor and continue...")
+                        
+                        if consecutive_errors >= max_consecutive_errors:
+                            print(f"Too many consecutive validation errors ({consecutive_errors}). Stopping pagination.")
+                            break
 
-                # Stop if we've reached the requested total (only if max_total is not None)
+                        # Use raw HTTP request to get JSON and extract cursor, then filter invalid markets
+                        try:
+                            # Build URL for raw HTTP request
+                            url = f"{base_url}/markets"
+                            headers = {}
+                            
+                            # Add authentication if available
+                            if hasattr(config, 'api_key_id') and config.api_key_id:
+                                # Kalshi API might need auth headers - check if needed
+                                pass
+                            
+                            http_params = {"limit": effective_page_size}
+                            if status is not None:
+                                http_params["status"] = status
+                            if cursor:
+                                http_params["cursor"] = cursor
+                            
+                            # Make raw HTTP request
+                            http_response = requests.get(url, params=http_params, headers=headers, timeout=30)
+                            http_response.raise_for_status()
+                            raw_data = http_response.json()
+                            
+                            # Extract cursor from raw response
+                            if 'cursor' in raw_data and raw_data['cursor']:
+                                cursor = raw_data['cursor']
+                                self.last_cursor = cursor
+                            else:
+                                self.last_cursor = None
+                                break
+
+                            # Try to parse markets from raw data, filtering out invalid ones
+                            if 'markets' in raw_data and raw_data['markets']:
+                                valid_statuses = {'initialized', 'active', 'closed', 'settled', 'determined'}
+                                valid_markets_count = 0
+                                
+                                for market_data in raw_data['markets']:
+                                    # Check if market has valid status before trying to deserialize
+                                    market_status = market_data.get('status', '')
+                                    if market_status not in valid_statuses:
+                                        skipped_markets += 1
+                                        continue
+                                    
+                                    # Try to create market object from valid data
+                                    try:
+                                        # Use SDK to create market object from dict
+                                        from kalshi_python.models.market import Market
+                                        market = Market.from_dict(market_data)
+                                        all_markets.append(market)
+                                        valid_markets_count += 1
+                                    except Exception as market_error:
+                                        skipped_markets += 1
+                                        continue
+                                
+                                if valid_markets_count > 0:
+                                    page_count += 1
+                                    if page_count % 10 == 0:
+                                        print(f"Fetched {len(all_markets)} markets so far (page {page_count}, {skipped_markets} markets skipped due to errors)...")
+                                
+                                # Continue to next iteration with updated cursor
+                                continue
+                            else:
+                                # No more markets
+                                self.last_cursor = None
+                                break
+
+                        except Exception as http_error:
+                            print(f"Raw HTTP request also failed: {http_error}")
+                            # Can't continue without cursor
+                            break
+                    else:
+                        # Re-raise if it's a different type of error
+                        raise
+
+                # Stop if we've reached the requested total (unless max_total is None, meaning fetch all)
                 if max_total is not None and len(all_markets) >= max_total:
+                    print(f"Reached requested limit of {max_total} markets")
                     break
 
             except Exception as e:
-                consecutive_errors += 1
-                print(f"Error fetching markets (page {page_count + 1}, error {consecutive_errors}): {e}")
-                
-                # If too many consecutive errors, stop to avoid infinite loop
-                if consecutive_errors >= max_consecutive_errors:
-                    print(f"Too many consecutive errors ({consecutive_errors}). Stopping pagination.")
-                    break
-                
-                # Try to continue with next cursor if we have one
-                # If we don't have a cursor, we can't continue, so break
-                if not cursor:
-                    print("No cursor available to continue after error. Stopping.")
-                    break
-                
-                # Skip this page and try to continue with the next one
-                # The cursor should still be valid for the next iteration
-                print(f"Attempting to continue with next page...")
-                continue
+                print(f"Error fetching markets on page {page_count + 1}: {e}")
+                import traceback
+                traceback.print_exc()
+                # Fallback: single request without pagination
+                try:
+                    fallback_params = {"limit": min(page_size, 100)}
+                    if status is not None:
+                        fallback_params["status"] = status
+                    if cursor:
+                        fallback_params["cursor"] = cursor
+                    response = self.client.get_markets(**fallback_params)
+                    if hasattr(response, 'markets') and response.markets:
+                        all_markets.extend(response.markets)
+                        # Update cursor if available
+                        if hasattr(response, 'cursor') and response.cursor:
+                            self.last_cursor = response.cursor
+                except Exception as fallback_error:
+                    print(f"Fallback also failed: {fallback_error}")
+                break
 
-        print(f"Successfully fetched {len(all_markets)} valid markets")
+        if max_total is None:
+            print(f"Successfully fetched ALL {len(all_markets)} available markets from Kalshi")
+        else:
+            print(f"Successfully fetched {len(all_markets)} valid markets")
         if self.last_cursor:
             print(f"Last cursor stored. Use get_next_markets() to continue from here.")
 
@@ -124,13 +210,13 @@ class BasicMM:
 
         return MarketResponse(all_markets)
     
-    def get_next_markets(self, max_total=10000, page_size=100, status=None):
+    def get_next_markets(self, max_total=10000, page_size=100, status="open"):
         """
         Get the next batch of markets continuing from the last cursor.
         This is useful when you've already fetched markets and want to continue.
-        
+
         Args:
-            max_total: Maximum number of markets to collect in this batch
+            max_total: Maximum number of markets to collect in this batch. If None, fetches all remaining markets.
             page_size: Number of markets per request
             status: Market status filter
         
@@ -167,28 +253,30 @@ class BasicMM:
             try:
                 resting_orders = self.client.get_total_resting_order_value()
                 return balance.balance - resting_orders
-            except Exception:
-                # API may not support this endpoint - just use balance
-                return balance.balance
+            except Exception as e:
+                print(f"Warning: Could not get resting order value: {e}")
+                return balance.balance  # Return just the balance if we can't get resting orders
         except Exception as e:
             print(f"Error getting balance: {e}")
-            return 0
+            return 0  # Return 0 if we can't get balance
 
     def identify_market_opportunities(self, max_total=100000, continue_from_last=False):
         """
         Identify market opportunities from fetched markets.
         
         Args:
-            max_total: Maximum number of markets to fetch and analyze
+            max_total: Maximum number of markets to fetch and analyze. If None, fetches all available markets.
             continue_from_last: If True, continue from last cursor instead of starting from beginning
         """
         start_time = time.perf_counter()
         
         if continue_from_last:
             print("Continuing from last cursor position...")
-            markets_response = self.get_next_markets(max_total=max_total, page_size=100, status=None)
+            markets_response = self.get_next_markets(max_total=max_total, page_size=100, status="open")
         else:
-            markets_response = self.get_markets(max_total=max_total, page_size=100, status=None)
+            if max_total is None:
+                print("Fetching ALL available markets from Kalshi (this may take a while)...")
+        markets_response = self.get_markets(max_total=max_total, page_size=100, status="open")
         
         markets = markets_response.markets if hasattr(markets_response, 'markets') else markets_response
         opportunities = []  # Will store tuples of (market, spread)
@@ -301,34 +389,69 @@ class BasicMM:
             
             # If not found in cache, fetch from API
             if market is None:
-                market = self.client.get_market(marketID)
-                if market is None:
+                market_response = self.client.get_market(marketID)
+                if market_response is None:
                     print(f"Error: Failed to get market data for {marketID}")
                     return None, None
-            
-            # If market is a string, we can't get attributes from it
-            if isinstance(market, str):
-                market = self.client.get_market(marketID)
-                if market is None or isinstance(market, str):
+                
+                # Handle GetMarketResponse object - extract the market from it
+                if hasattr(market_response, 'market') and market_response.market is not None:
+                    market = market_response.market
+                elif hasattr(market_response, 'yes_bid'):  # If it's already a Market object
+                    market = market_response
+                else:
+                    print(f"Error: Unexpected market response format for {marketID}")
                     return None, None
             
-            # Get bid/ask values from market object
-            yes_bid: Optional[Any] = None
-            yes_ask: Optional[Any] = None
+            # Debug: Print what we actually got
+            print(f"DEBUG get_price for {marketID}:")
+            print(f"  Market type: {type(market)}")
+            print(f"  Has yes_bid attr: {hasattr(market, 'yes_bid')}")
+            print(f"  Has yes_ask attr: {hasattr(market, 'yes_ask')}")
+            if hasattr(market, 'yes_bid'):
+                print(f"  yes_bid value: {market.yes_bid} (type: {type(market.yes_bid)})")
+            if hasattr(market, 'yes_ask'):
+                print(f"  yes_ask value: {market.yes_ask} (type: {type(market.yes_ask)})")
             
-            # Try attribute access first
+            # Try to get values - use the same pattern that works in identify_market_opportunities
+            yes_bid = None
+            yes_ask = None
+            
+            # Method 1: Direct attribute access (like in identify_market_opportunities line 179)
             if hasattr(market, 'yes_bid') and hasattr(market, 'yes_ask'):
-                yes_bid = getattr(market, 'yes_bid', None)
-                yes_ask = getattr(market, 'yes_ask', None)
+                try:
+                    yes_bid = market.yes_bid
+                    yes_ask = market.yes_ask
+                except AttributeError:
+                    pass
             
-            # Fallback to dictionary access
+            # Method 2: getattr fallback
+            if yes_bid is None:
+                yes_bid = getattr(market, 'yes_bid', None)
+            if yes_ask is None:
+                yes_ask = getattr(market, 'yes_ask', None)
+
+            # Method 3: Try dictionary access if it's a dict
             if yes_bid is None and isinstance(market, dict):
                 yes_bid = market.get('yes_bid')
             if yes_ask is None and isinstance(market, dict):
                 yes_ask = market.get('yes_ask')
             
-            # Validate prices (0 is not a valid price)
+            print(f"  Final yes_bid: {yes_bid}, yes_ask: {yes_ask}")
+            
+            # Handle case where values might be 0 (falsy but not None)
+            # 0 is not a valid price, so treat it as missing data
             if yes_bid is None or yes_ask is None or yes_bid == 0 or yes_ask == 0:
+                print(f"Warning: No bid/ask prices available for market {marketID} (yes_bid={yes_bid}, yes_ask={yes_ask})")
+                # Print all non-callable attributes for debugging
+                print(f"  All market attributes:")
+                for attr in dir(market):
+                    if not attr.startswith('_') and not callable(getattr(market, attr, None)):
+                        try:
+                            value = getattr(market, attr)
+                            print(f"    {attr} = {value}")
+                        except:
+                            pass
                 return None, None
 
             # Convert to integers (prices are typically in cents, 0-100 range)
@@ -368,6 +491,7 @@ class BasicMM:
             
         except Exception as e:
             print(f"Error in get_price for market {marketID}: {e}")
+            import traceback
             traceback.print_exc()
             return None, None
 
@@ -415,6 +539,12 @@ class BasicMM:
             buy_price_prob = buy_price_cents / 100.0
             sell_price_prob = sell_price_cents / 100.0
 
+            # Check if we have enough bankroll for both orders
+            # Buy orders cost money (buying yes contracts)
+            # Sell orders also cost money (selling yes = buying no contracts)
+            buy_order = None
+            sell_order = None
+            
             # Calculate how many contracts we can afford with the available bankroll
             # Cost per contract pair = buy_price + sell_price (need both for market making)
             cost_per_contract_pair = buy_price_cents + sell_price_cents
@@ -443,9 +573,6 @@ class BasicMM:
             
             # API expects yes_price in cents (1-99), not probability format
             # Keep prices in cents as returned by get_price
-            
-            buy_order = None
-            sell_order = None
             
             # Place buy order (buying yes contracts)
             if remaining_bankroll >= buy_order_total_cost:
@@ -617,8 +744,7 @@ class BasicMM:
         print(f"{'='*80}\n")
             
                 
-    async def run_async(self):
-        """Async version of run - continuously monitors and trades."""
+    async def run(self):
         bankroll = self.calculate_remaining_balance() - self.reserve_limit
         while bankroll > 0:
             self.identify_market_opportunities()
@@ -741,23 +867,32 @@ class BasicMM:
             print(f"Error: Could not get prices for market {market_id}. Cannot place orders.")
             return
         
+        # API expects yes_price in cents (1-99), not probability format
+        # Keep prices in cents as returned by get_price
+        
         buy_order = self.client.create_order(
             ticker=market_id,
-            side="yes",
-            action="buy",
-            count=contracts,
-            type="limit",
-            yes_price=buy_price_cents
+                        side="yes",
+                        action="buy",
+                        count=contracts,
+                        type="limit",
+            yes_price=buy_price_cents  # API expects cents (1-99), not probability
         )
-        
+        print(f"Buy order placed: {contracts} contracts @ {buy_price_cents}¢")
+        if buy_order and hasattr(buy_order, 'order_id'):
+            print(f"  Order ID: {buy_order.order_id}")
+                        
         sell_order = self.client.create_order(
             ticker=market_id,
-            side="yes",
-            action="sell",
-            count=contracts,
-            type="limit",
-            yes_price=sell_price_cents
+                        side="yes",
+                        action="sell",
+                        count=contracts,
+                        type="limit",
+            yes_price=sell_price_cents  # API expects cents (1-99), not probability
         )
+        print(f"Sell order placed: {contracts} contracts @ {sell_price_cents}¢")
+        if sell_order and hasattr(sell_order, 'order_id'):
+            print(f"  Order ID: {sell_order.order_id}")
 
 if __name__ == "__main__":
     mm = BasicMM(reserve_limit=10)
