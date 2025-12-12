@@ -176,6 +176,9 @@ class KalshiDashboard {
             this.updateStats();
             this.updateMarketSelects();
             this.updateSubscriptionsList();
+            if (this.updateMarketMakerSelect) {
+                this.updateMarketMakerSelect();
+            }
         });
         
         this.socket.on('unsubscription_result', (data) => {
@@ -184,6 +187,9 @@ class KalshiDashboard {
             this.updateStats();
             this.updateMarketSelects();
             this.updateSubscriptionsList();
+            if (this.updateMarketMakerSelect) {
+                this.updateMarketMakerSelect();
+            }
         });
     }
     
@@ -240,6 +246,12 @@ class KalshiDashboard {
         document.getElementById('clear-chart').addEventListener('click', () => {
             this.clearChart();
         });
+        
+        // Strategy bankroll inputs
+        this.setupStrategyInputs();
+        
+        // Market Maker section
+        this.setupMarketMaker();
     }
     
     subscribeToMarket(marketId) {
@@ -557,12 +569,10 @@ class KalshiDashboard {
                         borderWidth: 2,
                         fill: true,
                         tension: 0.1,
-                        pointRadius: function(context) {
-                            // Show points when there's only one or few data points
-                            const dataLength = context.dataset.data.length;
-                            return dataLength <= 3 ? 4 : 0;
-                        },
-                        pointHoverRadius: 6
+                        pointRadius: 4,  // Always show points
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#00ff00',
+                        pointBorderColor: '#00ff00'
                     },
                     {
                         label: 'NO Price',
@@ -572,12 +582,10 @@ class KalshiDashboard {
                         borderWidth: 2,
                         fill: true,
                         tension: 0.1,
-                        pointRadius: function(context) {
-                            // Show points when there's only one or few data points
-                            const dataLength = context.dataset.data.length;
-                            return dataLength <= 3 ? 4 : 0;
-                        },
-                        pointHoverRadius: 6
+                        pointRadius: 4,  // Always show points
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#ff0000',
+                        pointBorderColor: '#ff0000'
                     }
                 ]
             },
@@ -591,7 +599,9 @@ class KalshiDashboard {
                     x: {
                         display: true,
                         grid: { color: '#333333' },
-                        ticks: { color: '#888888' }
+                        ticks: { color: '#888888' },
+                        min: undefined,  // Let Chart.js auto-calculate
+                        max: undefined
                     },
                     y: {
                         display: true,
@@ -601,7 +611,9 @@ class KalshiDashboard {
                             callback: function(value) {
                                 return value.toFixed(2);
                             }
-                        }
+                        },
+                        min: 0,
+                        max: 100
                     }
                 }
             }
@@ -661,15 +673,32 @@ class KalshiDashboard {
         
         const labels = validData.map(d => d.label || new Date(d.timestamp).toLocaleTimeString());
         const yesPrices = validData.map(d => d.yes_price);
-        const noPrices = validData.map(d => d.no_price);
+        const noPrices = validData.map(d => d.no_price || (100 - d.yes_price)); // Calculate NO price if missing
         
         if (this.priceChart) {
             this.priceChart.data.labels = labels;
             this.priceChart.data.datasets[0].data = yesPrices;
             this.priceChart.data.datasets[1].data = noPrices;
-            // Use 'none' animation for smoother updates, but 'default' for initial load
-            const animationMode = validData.length === 1 ? 'default' : 'none';
-            this.priceChart.update(animationMode);
+            
+            // For single data point, ensure the chart displays properly
+            if (validData.length === 1) {
+                // Set explicit y-axis range for single point to ensure visibility
+                const singlePrice = yesPrices[0];
+                this.priceChart.options.scales.y.min = Math.max(0, singlePrice - 10);
+                this.priceChart.options.scales.y.max = Math.min(100, singlePrice + 10);
+                // Ensure x-axis shows the single point
+                this.priceChart.options.scales.x.min = 0;
+                this.priceChart.options.scales.x.max = 1;
+            } else {
+                // Reset to auto for multiple points
+                this.priceChart.options.scales.y.min = undefined;
+                this.priceChart.options.scales.y.max = undefined;
+                this.priceChart.options.scales.x.min = undefined;
+                this.priceChart.options.scales.x.max = undefined;
+            }
+            
+            // Always use animation for updates to ensure chart renders
+            this.priceChart.update('default');
         }
     }
     
@@ -686,6 +715,298 @@ class KalshiDashboard {
             this.priceData[this.selectedChartMarket] = [];
         }
     }
+    
+    setupStrategyInputs() {
+        // Market Making strategy bankroll input
+        const mmBankrollInput = document.getElementById('mm-bankroll');
+        const mmConfirmBtn = document.getElementById('mm-confirm-btn');
+        const mmStatus = document.getElementById('mm-status');
+        
+        if (!mmBankrollInput || !mmConfirmBtn) return;
+        
+        // Enable/disable confirm button based on input
+        mmBankrollInput.addEventListener('input', () => {
+            const value = parseFloat(mmBankrollInput.value);
+            mmConfirmBtn.disabled = !value || value <= 0 || isNaN(value);
+        });
+        
+        // Handle Enter key press
+        mmBankrollInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !mmConfirmBtn.disabled) {
+                mmConfirmBtn.click();
+            }
+        });
+        
+        // Handle confirm button click
+        mmConfirmBtn.addEventListener('click', () => {
+            const bankroll = parseFloat(mmBankrollInput.value);
+            if (bankroll && bankroll > 0) {
+                this.executeMarketMakingStrategy(bankroll, mmStatus);
+            }
+        });
+    }
+    
+    executeMarketMakingStrategy(bankroll, statusElement) {
+        // Update status
+        statusElement.textContent = `Executing Market Making strategy with bankroll: $${bankroll.toFixed(2)}...`;
+        statusElement.className = 'strategy-status info';
+        
+        // Log the strategy execution
+        this.addLog('info', `Market Making strategy initiated with bankroll: $${bankroll.toFixed(2)}`);
+        
+        // TODO: Implement actual strategy execution
+        // This would typically make an API call to the backend to start the strategy
+        // For now, we'll just show a success message after a short delay
+        
+        setTimeout(() => {
+            statusElement.textContent = `Strategy active with bankroll: $${bankroll.toFixed(2)}`;
+            statusElement.className = 'strategy-status success';
+            this.addLog('success', `Market Making strategy started with bankroll: $${bankroll.toFixed(2)}`);
+            
+            // In a real implementation, you would:
+            // 1. Send a request to the backend to start the strategy
+            // 2. The backend would initialize the BasicMM class with the bankroll
+            // 3. The backend would start the strategy execution
+            // 4. Real-time updates would be sent via WebSocket
+        }, 1000);
+    }
+    
+    setupMarketMaker() {
+        // Find Opportunities Section
+        const findBtn = document.getElementById('find-opportunities-btn');
+        const opportunitiesStatusDiv = document.getElementById('opportunities-status');
+        const opportunitiesListDiv = document.getElementById('opportunities-list');
+        
+        // Market Maker Controls Section
+        const marketSelect = document.getElementById('mm-market-select');
+        const mmBankrollInput = document.getElementById('mm-bankroll-input');
+        const startMMBtn = document.getElementById('start-market-maker-btn');
+        const mmStatusDiv = document.getElementById('market-maker-status');
+        
+        if (!findBtn || !marketSelect || !mmBankrollInput || !startMMBtn) return;
+        
+        // Update market select when subscribed markets change
+        this.updateMarketMakerSelect = () => {
+            const currentValue = marketSelect.value;
+            marketSelect.innerHTML = '<option value="">Select a subscribed market</option>';
+            
+            const sortedMarkets = Array.from(this.subscribedMarkets).sort();
+            sortedMarkets.forEach(marketId => {
+                const option = document.createElement('option');
+                option.value = marketId;
+                option.textContent = marketId;
+                marketSelect.appendChild(option);
+            });
+            
+            // Restore selection if still valid
+            if (currentValue && this.subscribedMarkets.has(currentValue)) {
+                marketSelect.value = currentValue;
+            }
+            
+            // Update button state
+            this.updateStartMMButtonState();
+        };
+        
+        // Enable/disable start market maker button (needs market and bankroll)
+        this.updateStartMMButtonState = () => {
+            const hasMarket = marketSelect.value && marketSelect.value !== '';
+            const hasBankroll = mmBankrollInput.value && parseFloat(mmBankrollInput.value) > 0;
+            startMMBtn.disabled = !hasMarket || !hasBankroll;
+        };
+        
+        // Find Opportunities button handler (standalone, no requirements)
+        findBtn.addEventListener('click', () => {
+            this.findMarketOpportunities(opportunitiesStatusDiv, opportunitiesListDiv);
+        });
+        
+        // Market Maker Controls button handlers
+        marketSelect.addEventListener('change', () => {
+            this.updateStartMMButtonState();
+        });
+        
+        mmBankrollInput.addEventListener('input', () => {
+            this.updateStartMMButtonState();
+        });
+        
+        startMMBtn.addEventListener('click', () => {
+            const marketId = marketSelect.value;
+            const bankroll = parseFloat(mmBankrollInput.value);
+            if (marketId && bankroll > 0) {
+                this.startMarketMaking(marketId, bankroll, mmStatusDiv);
+            }
+        });
+        
+        // Initial updates
+        this.updateMarketMakerSelect();
+    }
+    
+    findMarketOpportunities(statusDiv, listDiv) {
+        // Show loading status with spinner
+        statusDiv.innerHTML = '<div class="loading-container"><div class="spinner"></div><span>Finding market opportunities from ALL markets on Kalshi... This may take several minutes. Please wait...</span></div>';
+        statusDiv.className = 'opportunities-status info';
+        listDiv.style.display = 'none';
+        
+        // Disable button during loading
+        const findBtn = document.getElementById('find-opportunities-btn');
+        const originalBtnText = findBtn.textContent;
+        findBtn.disabled = true;
+        findBtn.textContent = 'Searching...';
+        
+        // Log the action
+        this.addLog('info', 'Finding market opportunities from ALL markets on Kalshi (this may take several minutes)...');
+        
+        // Call backend API (no parameters needed)
+        fetch('/api/find-opportunities', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({})
+        })
+        .then(response => {
+            // Check if response is ok
+            if (!response.ok) {
+                // Try to parse error message
+                return response.json().then(errData => {
+                    throw new Error(errData.error || `HTTP ${response.status}: ${response.statusText}`);
+                }).catch(() => {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Re-enable button
+            findBtn.disabled = false;
+            findBtn.textContent = originalBtnText;
+            
+            if (data.success) {
+                const count = data.opportunities ? data.opportunities.length : 0;
+                statusDiv.textContent = `Found ${count} market opportunities`;
+                statusDiv.className = 'opportunities-status success';
+                this.displayOpportunities(data.opportunities || [], listDiv);
+                this.addLog('success', `Found ${count} market opportunities from all markets`);
+            } else {
+                const errorMsg = data.error || 'Failed to find opportunities';
+                statusDiv.textContent = `Error: ${errorMsg}`;
+                statusDiv.className = 'opportunities-status error';
+                this.addLog('error', `Failed to find opportunities: ${errorMsg}`);
+            }
+        })
+        .catch(error => {
+            // Re-enable button on error
+            findBtn.disabled = false;
+            findBtn.textContent = originalBtnText;
+            
+            const errorMsg = error.message || 'Network error or server timeout';
+            statusDiv.textContent = `Error: ${errorMsg}`;
+            statusDiv.className = 'opportunities-status error';
+            this.addLog('error', `Error finding opportunities: ${errorMsg}`);
+            console.error('Find opportunities error:', error);
+        });
+    }
+    
+    startMarketMaking(marketId, bankroll, statusDiv) {
+        // Show confirmation dialog
+        const confirmed = confirm(
+            `Are you sure you want to start market making?\n\n` +
+            `Market: ${marketId}\n` +
+            `Bankroll: $${bankroll.toFixed(2)}\n\n` +
+            `This will place real orders using actual money.`
+        );
+        
+        if (!confirmed) {
+            statusDiv.textContent = 'Market making cancelled by user';
+            statusDiv.className = 'opportunities-status info';
+            this.addLog('info', 'Market making cancelled by user');
+            return;
+        }
+        
+        // Show loading status
+        statusDiv.textContent = `Starting market making for ${marketId} with bankroll: $${bankroll.toFixed(2)}...`;
+        statusDiv.className = 'opportunities-status info';
+        
+        this.addLog('info', `Starting market making for ${marketId} with bankroll: $${bankroll.toFixed(2)}`);
+        
+        // Call backend API to start market making
+        fetch('/api/start-market-making', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                market_id: marketId,
+                bankroll: bankroll
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                statusDiv.textContent = `Market making started for ${marketId} with bankroll: $${bankroll.toFixed(2)}`;
+                statusDiv.className = 'opportunities-status success';
+                this.addLog('success', `Market making started for ${marketId}: ${data.message || 'Orders placed successfully'}`);
+                
+                if (data.details) {
+                    this.addLog('info', `Details: ${JSON.stringify(data.details)}`);
+                }
+            } else {
+                statusDiv.textContent = `Error: ${data.error || 'Failed to start market making'}`;
+                statusDiv.className = 'opportunities-status error';
+                this.addLog('error', `Failed to start market making: ${data.error || 'Unknown error'}`);
+            }
+        })
+        .catch(error => {
+            statusDiv.textContent = `Error: ${error.message}`;
+            statusDiv.className = 'opportunities-status error';
+            this.addLog('error', `Error starting market making: ${error.message}`);
+        });
+    }
+    
+    displayOpportunities(opportunities, listDiv) {
+        const contentDiv = document.getElementById('opportunities-content');
+        if (!contentDiv) return;
+        
+        if (opportunities.length === 0) {
+            contentDiv.innerHTML = '<div class="no-data">No opportunities found matching the criteria.</div>';
+            listDiv.style.display = 'block';
+            return;
+        }
+        
+        contentDiv.innerHTML = opportunities.map((opp, index) => {
+            const ticker = opp.ticker || opp.market_id || 'Unknown';
+            const spread = opp.spread !== undefined ? (opp.spread * 100).toFixed(2) + '¢' : 'N/A';
+            const volume = opp.volume ? opp.volume.toLocaleString() : 'N/A';
+            const yesBid = opp.yes_bid !== undefined ? (opp.yes_bid > 1 ? opp.yes_bid.toFixed(2) + '¢' : (opp.yes_bid * 100).toFixed(2) + '¢') : 'N/A';
+            const yesAsk = opp.yes_ask !== undefined ? (opp.yes_ask > 1 ? opp.yes_ask.toFixed(2) + '¢' : (opp.yes_ask * 100).toFixed(2) + '¢') : 'N/A';
+            const title = opp.title || opp.question || 'No title available';
+            
+            return `
+                <div class="opportunity-item">
+                    <div class="opportunity-header">
+                        <span class="opportunity-ticker">${ticker}</span>
+                        <span class="opportunity-spread">Spread: ${spread}</span>
+                    </div>
+                    <div class="opportunity-title" style="color: #888; margin-bottom: 10px; font-size: 13px;">${title}</div>
+                    <div class="opportunity-details">
+                        <div class="opportunity-detail-item">
+                            <span class="opportunity-detail-label">Volume</span>
+                            <span class="opportunity-detail-value">${volume}</span>
+                        </div>
+                        <div class="opportunity-detail-item">
+                            <span class="opportunity-detail-label">YES Bid</span>
+                            <span class="opportunity-detail-value">${yesBid}</span>
+                        </div>
+                        <div class="opportunity-detail-item">
+                            <span class="opportunity-detail-label">YES Ask</span>
+                            <span class="opportunity-detail-value">${yesAsk}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        listDiv.style.display = 'block';
+    }
 }
 
 // Initialize dashboard when page loads
@@ -693,4 +1014,3 @@ let dashboard;
 document.addEventListener('DOMContentLoaded', () => {
     dashboard = new KalshiDashboard();
 });
-

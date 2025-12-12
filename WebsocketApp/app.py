@@ -130,6 +130,196 @@ def clear_logs():
     return jsonify({'success': True})
 
 
+@app.route('/api/find-opportunities', methods=['POST'])
+def find_opportunities():
+    """Find market opportunities using basicMM - matches the main method logic"""
+    try:
+        data = request.get_json() or {}
+        
+        # Import BasicMM
+        from Strategies.basicMM import BasicMM
+
+        # Create BasicMM instance (using demo mode from ws_handler)
+        demo = ws_handler.demo if hasattr(ws_handler, 'demo') else False
+        print(f"Initializing BasicMM in {'DEMO' if demo else 'PRODUCTION'} mode...")
+        mm = BasicMM(demo=demo)
+        
+        # Call identify_market_opportunities with max_total=None to fetch ALL markets (like main method)
+        print(f"Finding opportunities from ALL markets on Kalshi (this may take several minutes)...")
+        print("This will use pagination to fetch all available markets...")
+        
+        try:
+            mm.identify_market_opportunities(max_total=None, continue_from_last=False)  # None = fetch all markets
+        except Exception as identify_error:
+            import traceback
+            print(f"Error in identify_market_opportunities: {identify_error}")
+            traceback.print_exc()
+            return jsonify({
+                'error': f'Error identifying opportunities: {str(identify_error)}',
+                'success': False
+            }), 500
+        
+        # Check if market_opportunities was populated
+        if not hasattr(mm, 'market_opportunities') or not mm.market_opportunities:
+            print("Warning: No market opportunities found after identification")
+            return jsonify({
+                'success': True,
+                'opportunities': [],
+                'count': 0,
+                'message': 'No market opportunities found'
+            })
+        
+        print(f"Total markets analyzed: {len(mm.market_opportunities)}")
+        print(f"Total opportunities identified: {len(mm.market_opportunities)}")
+        
+        # Call filter_market_opportunities with default parameters (matching main method)
+        print("\nFiltering for markets with good volume and spread >= 3 cents...")
+        try:
+            filtered = mm.filter_market_opportunities(
+                min_spread=0.03,  # 3 cents spread minimum
+                min_volume=1000,  # Good volume threshold
+                max_spread=0.1,   # Maximum spread
+                min_price=0.1     # Minimum price
+            )
+        except Exception as filter_error:
+            import traceback
+            print(f"Error in filter_market_opportunities: {filter_error}")
+            traceback.print_exc()
+            return jsonify({
+                'error': f'Error filtering opportunities: {str(filter_error)}',
+                'success': False
+            }), 500
+        
+        print(f"Total filtered opportunities: {len(filtered)}")
+        
+        # Convert market objects to dictionaries for JSON serialization (matching main method format)
+        opportunities = []
+        for market in filtered:
+            try:
+                # Get spread (matching main method logic)
+                spread = mm.get_market_spread(market) if hasattr(mm, 'get_market_spread') else 0
+                if spread == 0:
+                    # Calculate spread from bid/ask
+                    yes_bid = getattr(market, 'yes_bid', None)
+                    yes_ask = getattr(market, 'yes_ask', None)
+                    if yes_bid is not None and yes_ask is not None:
+                        if yes_bid > 1 or yes_ask > 1:
+                            spread = (yes_ask - yes_bid) / 100.0
+                        else:
+                            spread = yes_ask - yes_bid
+                
+                # Get market details
+                market_id = getattr(market, 'ticker', None) or getattr(market, 'market_id', None)
+                title = getattr(market, 'title', None) or getattr(market, 'question', None)
+                volume = getattr(market, 'volume', 0) or 0
+                yes_bid = getattr(market, 'yes_bid', None)
+                yes_ask = getattr(market, 'yes_ask', None)
+                no_bid = getattr(market, 'no_bid', None)
+                no_ask = getattr(market, 'no_ask', None)
+                
+                opp_dict = {
+                    'ticker': market_id,
+                    'title': title,
+                    'spread': spread,
+                    'volume': volume,
+                    'yes_bid': yes_bid,
+                    'yes_ask': yes_ask,
+                    'no_bid': no_bid,
+                    'no_ask': no_ask,
+                }
+                opportunities.append(opp_dict)
+            except Exception as e:
+                print(f"Error serializing market opportunity: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        print(f"Successfully serialized {len(opportunities)} opportunities")
+        
+        return jsonify({
+            'success': True,
+            'opportunities': opportunities,
+            'count': len(opportunities),
+            'message': f'Found {len(opportunities)} market opportunities'
+        })
+        
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        print(f"Unexpected error in find_opportunities: {error_msg}")
+        traceback.print_exc()
+        return jsonify({
+            'error': error_msg,
+            'success': False
+        }), 500
+
+@app.route('/api/start-market-making', methods=['POST'])
+def start_market_making():
+    """Start market making for a single market using basicMM"""
+    try:
+        data = request.get_json()
+        market_id = data.get('market_id')
+        bankroll = data.get('bankroll')  # Bankroll in dollars
+        
+        if not market_id:
+            return jsonify({'error': 'Market ID is required', 'success': False}), 400
+        
+        if not bankroll or bankroll <= 0:
+            return jsonify({'error': 'Valid bankroll amount is required', 'success': False}), 400
+        
+        # Import BasicMM
+        from Strategies.basicMM import BasicMM
+        
+        # Create BasicMM instance (using demo mode from ws_handler)
+        demo = ws_handler.demo if hasattr(ws_handler, 'demo') else False
+        
+        # Log mode clearly
+        mode_str = 'DEMO' if demo else 'PRODUCTION'
+        if demo:
+            print(f"⚠️  WARNING: Trading in DEMO mode - orders will not execute in production!")
+        else:
+            print(f"✓ Trading in PRODUCTION mode - orders will execute with REAL MONEY!")
+        
+        mm = BasicMM(demo=demo)
+        
+        # Verify the client is using the correct mode
+        if hasattr(mm.client, 'api_client') and hasattr(mm.client.api_client, 'configuration'):
+            config_host = mm.client.api_client.configuration.host
+            if 'demo' in config_host.lower():
+                print(f"⚠️  Client configured for DEMO environment: {config_host}")
+            else:
+                print(f"✓ Client configured for PRODUCTION environment: {config_host}")
+        
+        # Convert bankroll from dollars to cents (trade function expects cents)
+        bankroll_cents = int(bankroll * 100)
+        
+        print(f"Starting market making for {market_id} with bankroll ${bankroll} (${bankroll_cents} cents) in {mode_str} mode")
+        
+        # Call trade function with single market ID (trade accepts both market objects and strings)
+        # The trade function will handle getting prices and placing orders
+        mm.trade([market_id], bankroll_cents)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Market making orders placed for {market_id}',
+            'details': {
+                'market_id': market_id,
+                'bankroll': bankroll,
+                'bankroll_cents': bankroll_cents,
+                'demo_mode': demo
+            }
+        })
+        
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        traceback.print_exc()
+        return jsonify({
+            'error': error_msg,
+            'success': False
+        }), 500
+
+
 @socketio.on('connect')
 def handle_connect():
     print('Client connected')

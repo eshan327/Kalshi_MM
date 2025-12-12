@@ -504,19 +504,332 @@ header h1 {
     position: relative;
 }
 
-.no-markets-card {
+/* Market Maker Section */
+.market-maker-section {
     background: #1a1a1a;
     border: 2px solid #333;
     border-radius: 8px;
-    padding: 40px;
-    text-align: center;
-    color: #666;
+    padding: 30px;
     margin-bottom: 20px;
 }
 
-.no-markets-card h3 {
+.market-maker-title {
     color: #00ff00;
+    margin-bottom: 25px;
+    font-size: 1.8em;
+    text-align: center;
+    border-bottom: 2px solid #333;
+    padding-bottom: 15px;
+}
+
+.find-opportunities-section {
+    margin-bottom: 30px;
+    padding-bottom: 30px;
+    border-bottom: 2px solid #333;
+}
+
+.find-opportunities-controls {
+    display: flex;
+    gap: 20px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.market-maker-controls-section {
+    margin-top: 20px;
+}
+
+.section-subtitle {
+    color: #00ff00;
+    margin-bottom: 15px;
+    font-size: 1.2em;
+    border-bottom: 1px solid #333;
+    padding-bottom: 10px;
+}
+
+.market-maker-controls {
+    display: flex;
+    gap: 20px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.market-maker-input-group {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 200px;
+}
+
+.market-maker-input-group label {
+    color: #00ff00;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+/* Loading spinner styles */
+.loading-container {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    justify-content: center;
+}
+
+.spinner {
+    border: 3px solid rgba(0, 255, 0, 0.2);
+    border-top: 3px solid #00ff00;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.opportunities-status {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    min-height: 20px;
+}
+
+.opportunities-status.info {
+    background: rgba(0, 170, 255, 0.1);
+    color: #00aaff;
+    border: 1px solid #00aaff;
+}
+
+.opportunities-status.success {
+    background: rgba(0, 255, 0, 0.1);
+    color: #00ff00;
+    border: 1px solid #00ff00;
+}
+
+.opportunities-status.error {
+    background: rgba(255, 0, 0, 0.1);
+    color: #ff0000;
+    border: 1px solid #ff0000;
+}
+
+.opportunities-list {
+    margin-top: 20px;
+    background: #0a0a0a;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 20px;
+}
+
+.opportunities-list h4 {
+    color: #00ff00;
+    margin-bottom: 15px;
+    border-bottom: 1px solid #333;
+    padding-bottom: 10px;
+}
+
+.opportunities-content {
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.opportunity-item {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 15px;
     margin-bottom: 10px;
+    transition: border-color 0.2s ease;
+}
+
+.opportunity-item:hover {
+    border-color: #555;
+}
+
+.opportunity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.opportunity-ticker {
+    color: #00ff00;
+    font-weight: bold;
+    font-size: 16px;
+}
+
+.opportunity-spread {
+    color: #00ff00;
+    font-size: 14px;
+    background: rgba(0, 255, 0, 0.1);
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.opportunity-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: #888;
+}
+
+.opportunity-detail-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.opportunity-detail-label {
+    color: #666;
+    margin-bottom: 2px;
+}
+
+.opportunity-detail-value {
+    color: #00ff00;
+}
+
+/* Strategy Section */
+.strategy-section {
+    background: #1a1a1a;
+    border: 2px solid #333;
+    border-radius: 8px;
+    padding: 30px;
+    margin-bottom: 20px;
+}
+
+.strategy-section-title {
+    color: #00ff00;
+    margin-bottom: 25px;
+    font-size: 1.8em;
+    text-align: center;
+    border-bottom: 2px solid #333;
+    padding-bottom: 15px;
+}
+
+.strategy-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+.strategy-card {
+    background: #0a0a0a;
+    border: 2px solid #333;
+    border-radius: 8px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.3s ease;
+}
+
+.strategy-card:hover {
+    border-color: #555;
+}
+
+.strategy-card.coming-soon {
+    opacity: 0.7;
+    border-color: #555;
+}
+
+.strategy-title {
+    color: #00ff00;
+    font-size: 1.4em;
+    margin-bottom: 15px;
+    text-align: center;
+    border-bottom: 1px solid #333;
+    padding-bottom: 10px;
+}
+
+.strategy-description {
+    color: #888;
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: 20px;
+    flex-grow: 1;
+}
+
+.strategy-description p {
+    margin: 0;
+}
+
+.bankroll-input-group {
+    margin-top: auto;
+    padding-top: 15px;
+    border-top: 1px solid #333;
+}
+
+.bankroll-input-group label {
+    display: block;
+    color: #00ff00;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.bankroll-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.bankroll-input {
+    flex: 1;
+    padding: 10px;
+    background: #0a0a0a;
+    border: 2px solid #333;
+    border-radius: 4px;
+    color: #00ff00;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 14px;
+}
+
+.bankroll-input:focus {
+    outline: none;
+    border-color: #00ff00;
+    box-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+}
+
+.bankroll-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-confirm {
+    padding: 10px 20px;
+    white-space: nowrap;
+}
+
+.strategy-status {
+    margin-top: 10px;
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    min-height: 20px;
+}
+
+.strategy-status.success {
+    background: rgba(0, 255, 0, 0.1);
+    color: #00ff00;
+    border: 1px solid #00ff00;
+}
+
+.strategy-status.error {
+    background: rgba(255, 0, 0, 0.1);
+    color: #ff0000;
+    border: 1px solid #ff0000;
+}
+
+.strategy-status.info {
+    background: rgba(0, 170, 255, 0.1);
+    color: #00aaff;
+    border: 1px solid #00aaff;
 }
 
 footer {
@@ -555,10 +868,18 @@ footer {
     .orderbook-grid {
         grid-template-columns: repeat(2, 1fr);
     }
+    
+    .strategy-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 @media (max-width: 768px) {
     .orderbook-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .strategy-grid {
         grid-template-columns: 1fr;
     }
     

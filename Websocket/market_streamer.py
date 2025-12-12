@@ -519,17 +519,38 @@ class KalshiMarketStreamer:
         Can trigger trading callbacks that use REST API to place orders.
         """
         try:
-            market_id = data.get("market_ticker") or data.get("market_id")
+            # Kalshi orderbook messages have the data in "msg" field
+            # Format: {"type": "orderbook_delta", "msg": {"market_ticker": "...", "yes": [...], "no": [...]}}
+            msg = data.get("msg", data)  # Fallback to data itself if no "msg" field
+            
+            # Extract market_id from various possible locations
+            market_id = (msg.get("market_ticker") or 
+                        msg.get("market_id") or 
+                        data.get("market_ticker") or 
+                        data.get("market_id"))
+            
+            if not market_id:
+                print(f"[{datetime.now().isoformat()}] ⚠ Orderbook update received but no market_id found. Data: {json.dumps(data, indent=2)}")
+                return
+            
             print(f"[{datetime.now().isoformat()}] 📊 Orderbook update received for {market_id}")
+            
+            # Pass the msg data (or full data if no msg) to the callback
+            # The callback expects the orderbook data, not the wrapper
+            orderbook_data = msg if msg != data else data
             
             # Call callback if set (for trading integration)
             if self.on_orderbook_update:
                 try:
-                    await self.on_orderbook_update(data, market_id)
+                    await self.on_orderbook_update(orderbook_data, market_id)
                 except Exception as e:
                     print(f"[{datetime.now().isoformat()}] ⚠ Error in orderbook callback: {e}")
+                    import traceback
+                    traceback.print_exc()
         except Exception as e:
             print(f"[{datetime.now().isoformat()}] Error handling orderbook: {e}")
+            import traceback
+            traceback.print_exc()
     
     async def handle_ticker(self, data: Dict[str, Any]):
         """

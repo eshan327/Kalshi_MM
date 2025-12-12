@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, Set, List, Optional, Callable, Any
 from collections import deque
 import sys
+import copy
 
 project_root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -106,27 +107,185 @@ class KalshiWebSocketHandler:
             cb('raw_message', {'message': formatted, 'timestamp': int(time.time() * 1000)})
     
     async def _handle_orderbook_update(self, data: Dict, market_id: Optional[str]):
-        if market_id is None or market_id not in self.subscribed_markets:
-            return
-        if market_id not in self.market_data:
-            self.market_data[market_id] = MarketData(market_id)
-        
-        market = self.market_data[market_id]
-        for key in ['yes_bids', 'yes_asks', 'no_bids', 'no_asks']:
-            if key in data:
-                market.orderbook[key] = data[key]
-        if 'bids' in data:
-            market.orderbook['yes_bids'] = data.get('bids', [])
-        if 'asks' in data:
-            market.orderbook['yes_asks'] = data.get('asks', [])
-        
-        self._update_prices_from_orderbook(market)
-        market.last_update = int(time.time() * 1000)
-        await self._cache_orderbook_if_needed(market_id)
-        self._store_price_data(market_id, market.yes_price, market.no_price)
-        
-        for cb in self.message_callbacks:
-            cb('orderbook_update', {'market_id': market_id, 'orderbook_data': market.orderbook})
+        """Handle orderbook update with delta merging"""
+        try:
+            self.add_log('info', f'Orderbook update received for {market_id}')
+            
+            if market_id is None or market_id not in self.subscribed_markets:
+                self.add_log('warning', f'Orderbook update for unsubscribed market: {market_id}')
+                return
+            
+            if market_id not in self.market_data:
+                self.market_data[market_id] = MarketData(market_id)
+            
+            market = self.market_data[market_id]
+            
+            # Extract orderbook_data from nested msg field if present
+            orderbook_data = data.get('msg', data)
+            
+            # Initialize orderbook if needed
+            if 'yes_bids' not in market.orderbook:
+                market.orderbook['yes_bids'] = []
+            if 'yes_asks' not in market.orderbook:
+                market.orderbook['yes_asks'] = []
+            
+            # Helper function to merge orderbook levels (for delta updates)
+            def merge_orderbook_levels(existing: List, updates: List) -> List:
+                """Merge orderbook updates into existing levels.
+                Updates can be [price, size] or {price, size} format.
+                If size is 0, remove the level. Otherwise, add or update.
+                """
+                # Convert existing to dict for easy lookup
+                level_map = {}
+                for entry in existing:
+                    if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                        price = float(entry[0])
+                        size = float(entry[1])
+                        level_map[price] = size
+                    elif isinstance(entry, dict):
+                        price = float(entry.get('price', entry.get('p', 0)))
+                        size = float(entry.get('size', entry.get('s', 0)))
+                        level_map[price] = size
+                
+                # Apply updates
+                for entry in updates:
+                    if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                        price = float(entry[0])
+                        size = float(entry[1])
+                    elif isinstance(entry, dict):
+                        price = float(entry.get('price', entry.get('p', 0)))
+                        size = float(entry.get('size', entry.get('s', 0)))
+                    else:
+                        continue
+                    
+                    if size == 0:
+                        # Remove level if size is 0
+                        level_map.pop(price, None)
+                    else:
+                        # Add or update level
+                        level_map[price] = size
+                
+                # Convert back to list format [price, size]
+                result = [[price, size] for price, size in level_map.items() if size > 0]
+                return result
+            
+            # Handle Kalshi's native format: {"yes": [...], "no": [...]}
+            # "yes" array contains YES bids (sorted descending by price)
+            # "no" array contains NO bids, which we convert to YES asks (100 - price, sorted ascending)
+            if 'yes' in orderbook_data:
+                yes_data = orderbook_data['yes']
+                if isinstance(yes_data, list):
+                    # Merge with existing bids
+                    market.orderbook['yes_bids'] = merge_orderbook_levels(
+                        market.orderbook.get('yes_bids', []), yes_data
+                    )
+                    # Sort descending by price (first element)
+                    market.orderbook['yes_bids'].sort(
+                        key=lambda x: float(x[0]) if isinstance(x, (list, tuple)) and len(x) > 0 else 0,
+                        reverse=True
+                    )
+            
+            if 'no' in orderbook_data:
+                # NO bids need to be converted to YES asks: YES ask price = 100 - NO bid price
+                no_data = orderbook_data['no']
+                if isinstance(no_data, list):
+                    # Convert NO prices to YES ask prices
+                    yes_ask_updates = []
+                    for entry in no_data:
+                        if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                            no_price = float(entry[0])
+                            size = entry[1]
+                            yes_ask_price = 100.0 - no_price
+                            yes_ask_updates.append([yes_ask_price, size])
+                        elif isinstance(entry, dict):
+                            no_price = float(entry.get('price', entry.get('p', 0)))
+                            size = entry.get('size', entry.get('s', 0))
+                            yes_ask_price = 100.0 - no_price
+                            yes_ask_updates.append([yes_ask_price, size])
+                    
+                    # Merge with existing asks
+                    market.orderbook['yes_asks'] = merge_orderbook_levels(
+                        market.orderbook.get('yes_asks', []), yes_ask_updates
+                    )
+                    # Sort ascending (lowest ask first)
+                    market.orderbook['yes_asks'].sort(
+                        key=lambda x: float(x[0]) if len(x) > 0 else 0
+                    )
+            
+            # Handle alternative format: {"yes_bids": [...], "yes_asks": [...]}
+            if 'yes_bids' in orderbook_data:
+                yes_bids_data = orderbook_data['yes_bids']
+                if isinstance(yes_bids_data, list):
+                    market.orderbook['yes_bids'] = merge_orderbook_levels(
+                        market.orderbook.get('yes_bids', []), yes_bids_data
+                    )
+                    market.orderbook['yes_bids'].sort(
+                        key=lambda x: float(x[0]) if isinstance(x, (list, tuple)) and len(x) > 0 else 0,
+                        reverse=True
+                    )
+            
+            if 'yes_asks' in orderbook_data:
+                yes_asks_data = orderbook_data['yes_asks']
+                if isinstance(yes_asks_data, list):
+                    market.orderbook['yes_asks'] = merge_orderbook_levels(
+                        market.orderbook.get('yes_asks', []), yes_asks_data
+                    )
+                    market.orderbook['yes_asks'].sort(
+                        key=lambda x: float(x[0]) if isinstance(x, (list, tuple)) and len(x) > 0 else 0
+                    )
+            
+            # Handle legacy format: {"bids": [...], "asks": [...]}
+            if 'bids' in orderbook_data and 'yes_bids' not in orderbook_data:
+                bids_data = orderbook_data.get('bids', [])
+                if isinstance(bids_data, list):
+                    market.orderbook['yes_bids'] = merge_orderbook_levels(
+                        market.orderbook.get('yes_bids', []), bids_data
+                    )
+                    market.orderbook['yes_bids'].sort(
+                        key=lambda x: float(x[0]) if isinstance(x, (list, tuple)) and len(x) > 0 else 0,
+                        reverse=True
+                    )
+            
+            if 'asks' in orderbook_data and 'yes_asks' not in orderbook_data:
+                asks_data = orderbook_data.get('asks', [])
+                if isinstance(asks_data, list):
+                    market.orderbook['yes_asks'] = merge_orderbook_levels(
+                        market.orderbook.get('yes_asks', []), asks_data
+                    )
+                    market.orderbook['yes_asks'].sort(
+                        key=lambda x: float(x[0]) if isinstance(x, (list, tuple)) and len(x) > 0 else 0
+                    )
+            
+            # Handle no contract orderbook (for reference, but we mainly use YES)
+            if 'no_bids' in orderbook_data:
+                market.orderbook['no_bids'] = orderbook_data['no_bids']
+            if 'no_asks' in orderbook_data:
+                market.orderbook['no_asks'] = orderbook_data['no_asks']
+            
+            self.add_log('info', f'Orderbook updated for {market_id}: {len(market.orderbook.get("yes_bids", []))} bids, {len(market.orderbook.get("yes_asks", []))} asks')
+            
+            # Calculate prices from best bid/ask
+            self._update_prices_from_orderbook(market)
+            
+            market.last_update = int(time.time() * 1000)
+            
+            # Cache orderbook every 10 minutes
+            await self._cache_orderbook_if_needed(market_id)
+            
+            # Store price data
+            self._store_price_data(market_id, market.yes_price, market.no_price)
+            
+            # Notify callbacks with deep copy to prevent reference issues
+            for cb in self.message_callbacks:
+                cb('orderbook_update', {
+                    'market_id': market_id,
+                    'orderbook_data': copy.deepcopy(market.orderbook)
+                })
+                
+        except Exception as e:
+            self.add_log('error', f'Error handling orderbook update: {str(e)}')
+            import traceback
+            self.add_log('error', f'Traceback: {traceback.format_exc()}')
     
     async def _handle_ticker_update(self, data: Dict, market_id: Optional[str]):
         if market_id is None or market_id not in self.subscribed_markets:

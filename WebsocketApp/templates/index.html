@@ -118,10 +118,128 @@
             </div>
         </div>
 
-        <!-- No Markets Message -->
-        <div id="no-markets" class="no-markets-card">
-            <h3>No Markets Subscribed</h3>
-            <p>Enter a Market ID above to start receiving live market data</p>
+        <!-- Market Maker Section -->
+        <div class="market-maker-section">
+            <h3 class="market-maker-title">Market Maker</h3>
+            
+            <!-- Find Opportunities Section -->
+            <div class="find-opportunities-section">
+                <div class="find-opportunities-controls">
+                    <button id="find-opportunities-btn" class="btn btn-primary">
+                        Find Market Opportunities
+                    </button>
+                </div>
+                <div id="opportunities-status" class="opportunities-status"></div>
+                <div id="opportunities-list" class="opportunities-list" style="display: none;">
+                    <h4>Market Opportunities</h4>
+                    <div id="opportunities-content" class="opportunities-content">
+                        <!-- Opportunities will be displayed here -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Market Maker Controls Section -->
+            <div class="market-maker-controls-section">
+                <h4 class="section-subtitle">Market Maker Controls</h4>
+                <div class="market-maker-controls">
+                    <div class="market-maker-input-group">
+                        <label for="mm-market-select">Select Market:</label>
+                        <select id="mm-market-select" class="market-select">
+                            <option value="">Select a subscribed market</option>
+                        </select>
+                    </div>
+                    <div class="market-maker-input-group">
+                        <label for="mm-bankroll-input">Bankroll ($):</label>
+                        <input 
+                            type="number" 
+                            id="mm-bankroll-input" 
+                            class="bankroll-input"
+                            placeholder="Enter bankroll amount"
+                            min="0"
+                            step="0.01"
+                        />
+                    </div>
+                    <button id="start-market-maker-btn" class="btn btn-success" disabled>
+                        Start Market Making
+                    </button>
+                </div>
+                <div id="market-maker-status" class="opportunities-status"></div>
+            </div>
+        </div>
+
+        <!-- Strategy Section -->
+        <div class="strategy-section">
+            <h3 class="strategy-section-title">Trading Strategies</h3>
+            <div class="strategy-grid">
+                <!-- Market Making Strategy -->
+                <div class="strategy-card">
+                    <h4 class="strategy-title">Market Making</h4>
+                    <div class="strategy-description">
+                        <p>Market making involves placing both buy and sell orders simultaneously to capture the bid-ask spread. The strategy identifies markets with sufficient spread (typically 3¢ or more) and places limit orders at improved prices. This strategy profits from the difference between bid and ask prices while providing liquidity to the market.</p>
+                    </div>
+                    <div class="bankroll-input-group">
+                        <label for="mm-bankroll">Bankroll ($):</label>
+                        <div class="bankroll-controls">
+                            <input 
+                                type="number" 
+                                id="mm-bankroll" 
+                                class="bankroll-input"
+                                placeholder="Enter amount"
+                                min="0"
+                                step="0.01"
+                            />
+                            <button id="mm-confirm-btn" class="btn btn-primary btn-confirm" disabled>
+                                Confirm
+                            </button>
+                        </div>
+                        <div id="mm-status" class="strategy-status"></div>
+                    </div>
+                </div>
+
+                <!-- Coming Soon Strategy 1 -->
+                <div class="strategy-card coming-soon">
+                    <h4 class="strategy-title">Coming Soon</h4>
+                    <div class="strategy-description">
+                        <p>This strategy is currently under development. Check back soon for updates.</p>
+                    </div>
+                    <div class="bankroll-input-group">
+                        <label>Bankroll ($):</label>
+                        <div class="bankroll-controls">
+                            <input 
+                                type="number" 
+                                class="bankroll-input"
+                                placeholder="Coming Soon"
+                                disabled
+                            />
+                            <button class="btn btn-secondary btn-confirm" disabled>
+                                Confirm
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Coming Soon Strategy 2 -->
+                <div class="strategy-card coming-soon">
+                    <h4 class="strategy-title">Coming Soon</h4>
+                    <div class="strategy-description">
+                        <p>This strategy is currently under development. Check back soon for updates.</p>
+                    </div>
+                    <div class="bankroll-input-group">
+                        <label>Bankroll ($):</label>
+                        <div class="bankroll-controls">
+                            <input 
+                                type="number" 
+                                class="bankroll-input"
+                                placeholder="Coming Soon"
+                                disabled
+                            />
+                            <button class="btn btn-secondary btn-confirm" disabled>
+                                Confirm
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Footer -->
@@ -133,4 +251,3 @@
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
-
