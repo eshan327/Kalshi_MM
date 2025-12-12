@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Kalshi MM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <header class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+        <div class="flex items-center space-x-4">
+            <a href="/" class="text-2xl font-bold text-blue-400">Kalshi MM</a>
+            <span class="text-gray-400">|</span>
+            <span class="text-gray-300">Settings</span>
+        </div>
+    </header>
+    
+    <main class="p-6 max-w-2xl">
+        <h2 class="text-xl font-semibold mb-6">Configuration</h2>
+        
+        <form id="config-form" class="space-y-6">
+            <!-- Risk Settings -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h3 class="text-lg font-medium mb-4">Risk Limits</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Max Position Per Market</label>
+                        <input type="number" id="max_position_per_market" 
+                            class="w-full bg-gray-700 rounded px-3 py-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Max Total Position</label>
+                        <input type="number" id="max_total_position" 
+                            class="w-full bg-gray-700 rounded px-3 py-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Default Order Size</label>
+                        <input type="number" id="default_order_size" 
+                            class="w-full bg-gray-700 rounded px-3 py-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Max Daily Loss ($)</label>
+                        <input type="number" id="max_daily_loss" step="0.01"
+                            class="w-full bg-gray-700 rounded px-3 py-2 text-white">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Strategy Settings -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h3 class="text-lg font-medium mb-4">Strategy</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Min Spread (¢)</label>
+                        <input type="number" id="min_spread" 
+                            class="w-full bg-gray-700 rounded px-3 py-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Default Half-Spread (¢)</label>
+                        <input type="number" id="default_spread" 
+                            class="w-full bg-gray-700 rounded px-3 py-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Quote Refresh (sec)</label>
+                        <input type="number" id="quote_refresh_interval" step="0.1"
+                            class="w-full bg-gray-700 rounded px-3 py-2 text-white">
+                    </div>
+                </div>
+            </div>
+            
+            <button type="submit" 
+                class="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition">
+                Save Changes
+            </button>
+        </form>
+    </main>
+    
+    <script>
+        async function loadConfig() {
+            const response = await fetch('/api/config');
+            const config = await response.json();
+            
+            document.getElementById('max_position_per_market').value = config.risk.max_position_per_market;
+            document.getElementById('max_total_position').value = config.risk.max_total_position;
+            document.getElementById('default_order_size').value = config.risk.default_order_size;
+            document.getElementById('max_daily_loss').value = config.risk.max_daily_loss;
+            document.getElementById('min_spread').value = config.strategy.min_spread;
+            document.getElementById('default_spread').value = config.strategy.default_spread;
+            document.getElementById('quote_refresh_interval').value = config.strategy.quote_refresh_interval;
+        }
+        
+        document.getElementById('config-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const payload = {
+                risk: {
+                    max_position_per_market: parseInt(document.getElementById('max_position_per_market').value),
+                    max_total_position: parseInt(document.getElementById('max_total_position').value),
+                    default_order_size: parseInt(document.getElementById('default_order_size').value),
+                },
+                strategy: {
+                    min_spread: parseInt(document.getElementById('min_spread').value),
+                    default_spread: parseInt(document.getElementById('default_spread').value),
+                    quote_refresh_interval: parseFloat(document.getElementById('quote_refresh_interval').value),
+                }
+            };
+            
+            await fetch('/api/config', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            alert('Configuration saved!');
+        });
+        
+        loadConfig();
+    </script>
+</body>
+</html>

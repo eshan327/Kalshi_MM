@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kalshi Market Maker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-running { background-color: #10B981; }
+        .status-paused { background-color: #F59E0B; }
+        .status-stopped { background-color: #6B7280; }
+        .status-halted { background-color: #EF4444; }
+        
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <!-- Header -->
+    <header class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <h1 class="text-2xl font-bold text-blue-400">Kalshi MM</h1>
+                <span class="text-gray-400">|</span>
+                <span id="series-name" class="text-gray-300">KXHIGHNY</span>
+            </div>
+            <div class="flex items-center space-x-6">
+                <!-- Connection Status -->
+                <div class="flex items-center space-x-2">
+                    <span id="ws-status-dot" class="status-dot status-stopped"></span>
+                    <span id="ws-status-text" class="text-sm text-gray-400">WebSocket Disconnected</span>
+                </div>
+                <!-- Balance -->
+                <div class="text-right">
+                    <div class="text-sm text-gray-400">Balance</div>
+                    <div id="balance" class="text-xl font-mono font-bold text-green-400">$0.00</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="p-6">
+        <!-- Strategy Control Panel -->
+        <div class="bg-gray-800 rounded-lg p-6 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-4">
+                    <h2 class="text-xl font-semibold">Strategy Control</h2>
+                    <div class="flex items-center space-x-2">
+                        <span id="strategy-status-dot" class="status-dot status-stopped"></span>
+                        <span id="strategy-status-text" class="text-gray-300">Stopped</span>
+                    </div>
+                </div>
+                <div class="flex space-x-3">
+                    <button id="btn-start" onclick="startStrategy()" 
+                        class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-medium transition">
+                        Start
+                    </button>
+                    <button id="btn-pause" onclick="pauseStrategy()" 
+                        class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-medium transition hidden">
+                        Pause
+                    </button>
+                    <button id="btn-resume" onclick="resumeStrategy()" 
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition hidden">
+                        Resume
+                    </button>
+                    <button id="btn-stop" onclick="stopStrategy()" 
+                        class="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg font-medium transition hidden">
+                        Stop
+                    </button>
+                    <button id="btn-kill" onclick="killSwitch()" 
+                        class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-medium transition">
+                        ⚠️ Kill Switch
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Stats Row -->
+            <div class="grid grid-cols-5 gap-4 text-center">
+                <div class="bg-gray-700 rounded-lg p-4">
+                    <div class="text-sm text-gray-400">Uptime</div>
+                    <div id="stat-uptime" class="text-lg font-mono">00:00:00</div>
+                </div>
+                <div class="bg-gray-700 rounded-lg p-4">
+                    <div class="text-sm text-gray-400">Total Quotes</div>
+                    <div id="stat-quotes" class="text-lg font-mono">0</div>
+                </div>
+                <div class="bg-gray-700 rounded-lg p-4">
+                    <div class="text-sm text-gray-400">Total Fills</div>
+                    <div id="stat-fills" class="text-lg font-mono">0</div>
+                </div>
+                <div class="bg-gray-700 rounded-lg p-4">
+                    <div class="text-sm text-gray-400">Volume</div>
+                    <div id="stat-volume" class="text-lg font-mono">0</div>
+                </div>
+                <div class="bg-gray-700 rounded-lg p-4">
+                    <div class="text-sm text-gray-400">Daily P&L</div>
+                    <div id="stat-pnl" class="text-lg font-mono text-green-400">$0.00</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-3 gap-6">
+            <!-- Markets Panel -->
+            <div class="col-span-2 bg-gray-800 rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Active Markets</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-gray-400 border-b border-gray-700">
+                                <th class="pb-3 pr-4">Market</th>
+                                <th class="pb-3 px-4 text-center">Position</th>
+                                <th class="pb-3 px-4 text-center">Fair Value</th>
+                                <th class="pb-3 px-4 text-center">Bid</th>
+                                <th class="pb-3 px-4 text-center">Ask</th>
+                                <th class="pb-3 px-4 text-center">Spread</th>
+                                <th class="pb-3 px-4 text-center">Fills</th>
+                                <th class="pb-3 pl-4 text-center">Active</th>
+                            </tr>
+                        </thead>
+                        <tbody id="markets-table">
+                            <tr>
+                                <td colspan="8" class="py-8 text-center text-gray-500">
+                                    Loading markets...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Risk Panel -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Risk Monitor</h2>
+                
+                <div class="space-y-4">
+                    <!-- Risk Status -->
+                    <div id="risk-alert" class="hidden bg-red-900 border border-red-700 rounded-lg p-4">
+                        <div class="flex items-center space-x-2">
+                            <span class="text-red-400 font-bold">⚠️ TRADING HALTED</span>
+                        </div>
+                        <div id="risk-alert-reason" class="text-sm text-red-300 mt-1"></div>
+                    </div>
+                    
+                    <!-- Position Summary -->
+                    <div class="bg-gray-700 rounded-lg p-4">
+                        <div class="text-sm text-gray-400 mb-2">Total Position</div>
+                        <div class="flex items-center justify-between">
+                            <span id="risk-position" class="text-2xl font-mono">0</span>
+                            <span class="text-gray-400">/ <span id="risk-max-position">500</span></span>
+                        </div>
+                        <div class="mt-2 bg-gray-600 rounded-full h-2">
+                            <div id="risk-position-bar" class="bg-blue-500 rounded-full h-2" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Daily P&L Limit -->
+                    <div class="bg-gray-700 rounded-lg p-4">
+                        <div class="text-sm text-gray-400 mb-2">Daily P&L Limit</div>
+                        <div class="flex items-center justify-between">
+                            <span id="risk-daily-pnl" class="text-2xl font-mono text-green-400">$0.00</span>
+                            <span class="text-gray-400">/ -$<span id="risk-max-loss">50.00</span></span>
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Actions -->
+                    <div class="space-y-2">
+                        <button onclick="cancelAllOrders()" 
+                            class="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-medium transition">
+                            Cancel All Orders
+                        </button>
+                        <button onclick="syncPositions()" 
+                            class="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-medium transition">
+                            Sync Positions
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Orders & Fills -->
+        <div class="grid grid-cols-2 gap-6 mt-6">
+            <!-- Open Orders -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Open Orders</h2>
+                <div class="overflow-y-auto max-h-64">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-gray-400 border-b border-gray-700">
+                                <th class="pb-2">Ticker</th>
+                                <th class="pb-2 text-center">Side</th>
+                                <th class="pb-2 text-center">Price</th>
+                                <th class="pb-2 text-center">Qty</th>
+                                <th class="pb-2"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="orders-table">
+                            <tr>
+                                <td colspan="5" class="py-4 text-center text-gray-500">No open orders</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Recent Fills -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Recent Fills</h2>
+                <div class="overflow-y-auto max-h-64">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-gray-400 border-b border-gray-700">
+                                <th class="pb-2">Time</th>
+                                <th class="pb-2">Ticker</th>
+                                <th class="pb-2 text-center">Side</th>
+                                <th class="pb-2 text-center">Price</th>
+                                <th class="pb-2 text-center">Qty</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fills-table">
+                            <tr>
+                                <td colspan="5" class="py-4 text-center text-gray-500">No recent fills</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // State
+        let refreshInterval = null;
+        
+        // API calls
+        async function api(endpoint, method = 'GET', body = null) {
+            const options = { method };
+            if (body) {
+                options.headers = { 'Content-Type': 'application/json' };
+                options.body = JSON.stringify(body);
+            }
+            const response = await fetch(`/api${endpoint}`, options);
+            return response.json();
+        }
+        
+        // Strategy controls
+        async function startStrategy() {
+            await api('/strategy/start', 'POST');
+            refreshStatus();
+        }
+        
+        async function stopStrategy() {
+            await api('/strategy/stop', 'POST');
+            refreshStatus();
+        }
+        
+        async function pauseStrategy() {
+            await api('/strategy/pause', 'POST');
+            refreshStatus();
+        }
+        
+        async function resumeStrategy() {
+            await api('/strategy/resume', 'POST');
+            refreshStatus();
+        }
+        
+        async function killSwitch() {
+            if (confirm('⚠️ KILL SWITCH: This will cancel ALL orders and halt trading. Continue?')) {
+                await api('/risk/kill-switch', 'POST');
+                refreshStatus();
+            }
+        }
+        
+        async function cancelAllOrders() {
+            await api('/risk/cancel-all', 'POST');
+            refreshOrders();
+        }
+        
+        async function syncPositions() {
+            // Trigger position sync by getting positions
+            await api('/account/positions');
+            refreshRisk();
+        }
+        
+        async function toggleMarket(ticker, active) {
+            await api(`/strategy/markets/${ticker}/toggle`, 'POST', { active });
+            refreshMarkets();
+        }
+        
+        // Refresh functions
+        async function refreshBalance() {
+            const data = await api('/account/balance');
+            document.getElementById('balance').textContent = `$${data.balance.toFixed(2)}`;
+        }
+        
+        async function refreshStatus() {
+            const data = await api('/strategy/status');
+            
+            // Update strategy status
+            const state = data.state;
+            const statusDot = document.getElementById('strategy-status-dot');
+            const statusText = document.getElementById('strategy-status-text');
+            
+            statusDot.className = 'status-dot status-' + state;
+            statusText.textContent = state.charAt(0).toUpperCase() + state.slice(1);
+            
+            // Update buttons
+            const isRunning = state === 'running';
+            const isPaused = state === 'paused';
+            const isStopped = state === 'stopped';
+            
+            document.getElementById('btn-start').classList.toggle('hidden', !isStopped);
+            document.getElementById('btn-pause').classList.toggle('hidden', !isRunning);
+            document.getElementById('btn-resume').classList.toggle('hidden', !isPaused);
+            document.getElementById('btn-stop').classList.toggle('hidden', isStopped);
+            
+            // Update stats
+            document.getElementById('stat-quotes').textContent = data.stats.total_quotes;
+            document.getElementById('stat-fills').textContent = data.stats.total_fills;
+            document.getElementById('stat-volume').textContent = data.stats.total_volume;
+            
+            const uptime = data.stats.uptime_seconds || 0;
+            const hours = Math.floor(uptime / 3600);
+            const mins = Math.floor((uptime % 3600) / 60);
+            const secs = Math.floor(uptime % 60);
+            document.getElementById('stat-uptime').textContent = 
+                `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            
+            // Update P&L
+            const pnl = data.risk.daily_pnl || 0;
+            const pnlEl = document.getElementById('stat-pnl');
+            pnlEl.textContent = `$${pnl.toFixed(2)}`;
+            pnlEl.className = 'text-lg font-mono ' + (pnl >= 0 ? 'text-green-400' : 'text-red-400');
+            
+            // WebSocket status
+            const wsConnected = data.websocket_connected;
+            document.getElementById('ws-status-dot').className = 
+                'status-dot ' + (wsConnected ? 'status-running' : 'status-stopped');
+            document.getElementById('ws-status-text').textContent = 
+                wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected';
+            
+            // Risk halt status
+            const riskAlert = document.getElementById('risk-alert');
+            if (data.risk.is_halted) {
+                riskAlert.classList.remove('hidden');
+                document.getElementById('risk-alert-reason').textContent = data.risk.halt_reason || 'Unknown';
+            } else {
+                riskAlert.classList.add('hidden');
+            }
+        }
+        
+        async function refreshMarkets() {
+            const data = await api('/strategy/markets');
+            const positions = await api('/account/positions');
+            
+            // Create position lookup
+            const posLookup = {};
+            for (const p of positions.positions) {
+                posLookup[p.ticker] = p.position;
+            }
+            
+            const tbody = document.getElementById('markets-table');
+            if (!data.markets || data.markets.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="py-8 text-center text-gray-500">No markets loaded. Start the strategy to load markets.</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = data.markets.map(m => {
+                const pos = posLookup[m.ticker] || 0;
+                const posClass = pos > 0 ? 'text-green-400' : pos < 0 ? 'text-red-400' : 'text-gray-400';
+                const fv = m.fair_value?.value || '-';
+                const bid = m.quote?.bid || '-';
+                const ask = m.quote?.ask || '-';
+                const spread = (bid !== '-' && ask !== '-') ? (ask - bid) : '-';
+                
+                return `
+                    <tr class="border-b border-gray-700 hover:bg-gray-750">
+                        <td class="py-3 pr-4">
+                            <div class="font-medium">${m.ticker}</div>
+                            <div class="text-xs text-gray-500 truncate max-w-xs">${m.title}</div>
+                        </td>
+                        <td class="py-3 px-4 text-center font-mono ${posClass}">${pos}</td>
+                        <td class="py-3 px-4 text-center font-mono">${fv}¢</td>
+                        <td class="py-3 px-4 text-center font-mono text-green-400">${bid}¢</td>
+                        <td class="py-3 px-4 text-center font-mono text-red-400">${ask}¢</td>
+                        <td class="py-3 px-4 text-center font-mono">${spread}¢</td>
+                        <td class="py-3 px-4 text-center font-mono">${m.fills_count}</td>
+                        <td class="py-3 pl-4 text-center">
+                            <button onclick="toggleMarket('${m.ticker}', ${!m.is_active})"
+                                class="px-2 py-1 rounded text-xs ${m.is_active ? 'bg-green-600' : 'bg-gray-600'}">
+                                ${m.is_active ? 'ON' : 'OFF'}
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        
+        async function refreshOrders() {
+            const data = await api('/account/orders?status=resting');
+            const tbody = document.getElementById('orders-table');
+            
+            if (!data.orders || data.orders.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No open orders</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = data.orders.slice(0, 20).map(o => `
+                <tr class="border-b border-gray-700">
+                    <td class="py-2 text-xs">${o.ticker}</td>
+                    <td class="py-2 text-center">
+                        <span class="${o.action === 'buy' ? 'text-green-400' : 'text-red-400'}">${o.action.toUpperCase()}</span>
+                        <span class="text-gray-400">${o.side}</span>
+                    </td>
+                    <td class="py-2 text-center font-mono">${o.yes_price || o.no_price}¢</td>
+                    <td class="py-2 text-center font-mono">${o.remaining_count}</td>
+                    <td class="py-2 text-right">
+                        <button onclick="cancelOrder('${o.order_id}')" class="text-red-400 hover:text-red-300 text-xs">✕</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+        
+        async function refreshFills() {
+            const data = await api('/account/fills?limit=20');
+            const tbody = document.getElementById('fills-table');
+            
+            if (!data.fills || data.fills.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No recent fills</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = data.fills.map(f => {
+                const time = new Date(f.created_time).toLocaleTimeString();
+                return `
+                    <tr class="border-b border-gray-700">
+                        <td class="py-2 text-xs text-gray-400">${time}</td>
+                        <td class="py-2 text-xs">${f.ticker}</td>
+                        <td class="py-2 text-center">
+                            <span class="${f.action === 'buy' ? 'text-green-400' : 'text-red-400'}">${f.action.toUpperCase()}</span>
+                        </td>
+                        <td class="py-2 text-center font-mono">${f.price}¢</td>
+                        <td class="py-2 text-center font-mono">${f.count}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        
+        async function refreshRisk() {
+            const data = await api('/risk/status');
+            
+            // Update position bar
+            const pos = data.total_position || 0;
+            const maxPos = 500; // From config
+            document.getElementById('risk-position').textContent = pos;
+            document.getElementById('risk-position-bar').style.width = `${Math.min(100, (pos / maxPos) * 100)}%`;
+            
+            // Update P&L
+            const pnl = data.daily_pnl || 0;
+            const pnlEl = document.getElementById('risk-daily-pnl');
+            pnlEl.textContent = `$${pnl.toFixed(2)}`;
+            pnlEl.className = 'text-2xl font-mono ' + (pnl >= 0 ? 'text-green-400' : 'text-red-400');
+        }
+        
+        async function cancelOrder(orderId) {
+            // Would need to implement this endpoint
+            console.log('Cancel order:', orderId);
+        }
+        
+        // Refresh all data
+        async function refreshAll() {
+            await Promise.all([
+                refreshBalance(),
+                refreshStatus(),
+                refreshMarkets(),
+                refreshOrders(),
+                refreshFills(),
+                refreshRisk(),
+            ]);
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshAll();
+            // Auto-refresh every 2 seconds
+            refreshInterval = setInterval(refreshAll, 2000);
+        });
+    </script>
+</body>
+</html>

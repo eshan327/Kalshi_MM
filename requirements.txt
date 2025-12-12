@@ -1,0 +1,18 @@
+# Kalshi SDK
+kalshi-python>=2.1.4
+
+# Web framework
+flask>=3.1.0
+flask-socketio>=5.5.0
+
+# HTTP client (for NWS weather API)
+requests>=2.32.0
+
+# WebSocket client
+websockets>=15.0.0
+
+# Cryptography (for API authentication)
+cryptography>=46.0.0
+
+# Statistics (for fair value calculations)
+scipy>=1.11.0
