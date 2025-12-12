@@ -288,13 +288,18 @@ class MarketMaker:
                 market.current_quote.ask_price != quote.ask_price):
                 self._cancel_market_quotes(market)
         
-        # Place new orders
-        if can_bid and not market.bid_order_id:
+        # Restrict to one contract at a time: only place a new buy if position is 0 and no open buy order
+        # Only place a new sell if position is 1 and no open sell order
+        mr = risk_manager.get_market_risk(market.ticker)
+        position = mr.position if mr else 0
+        
+        # Only place a new buy if position is 0 and no open buy order
+        if can_bid and not market.bid_order_id and position == 0:
             result = kalshi_service.create_order(
                 ticker=market.ticker,
                 action='buy',
                 side='yes',
-                count=quote.bid_size,
+                count=1,  # Always 1 contract
                 order_type='limit',
                 price=quote.bid_price,
             )
@@ -302,12 +307,13 @@ class MarketMaker:
                 market.bid_order_id = result.order_id
                 self._stats.total_quotes += 1
         
-        if can_ask and not market.ask_order_id:
+        # Only place a new sell if position is 1 and no open sell order
+        if can_ask and not market.ask_order_id and position == 1:
             result = kalshi_service.create_order(
                 ticker=market.ticker,
                 action='sell',
                 side='yes',
-                count=quote.ask_size,
+                count=1,  # Always 1 contract
                 order_type='limit',
                 price=quote.ask_price,
             )
