@@ -46,24 +46,16 @@ pip install -r requirements.txt
 
 ### Configuration
 
-1. **Create environment file**:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. **Add your API credentials** to `.env`:
-   ```bash
-   KALSHI_PROD_API_KEY_ID=your-api-key-id-here
-   KALSHI_ENV=prod  # or "demo" for testing
-   ```
-
-3. **Add your API key file**: Place your Kalshi private key in the project root:
+1. **Add your API key**: Place your Kalshi private key file in the project root:
    ```
    private_key.pem      # Production key
    private_demo_key.pem # Demo key (optional)
    ```
-   
-   Get your API key from: https://kalshi.com/settings/api
+
+2. **Update config** (optional): Edit `config.py` to change:
+   - API key ID
+   - Risk limits (position size, daily loss)
+   - Strategy parameters (target spread, order size)
 
 ### Running
 
@@ -84,8 +76,7 @@ python cli.py
 Kalshi_MM/
 ├── run.py              # Start web server
 ├── cli.py              # CLI test script
-├── config.py           # Configuration (reads from .env)
-├── .env.example        # Example environment file
+├── config.py           # All configuration
 │
 ├── app/                # Flask web app
 │   ├── routes/         # API endpoints

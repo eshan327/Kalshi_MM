@@ -8,23 +8,7 @@ opportunities without starting the web server.
 Usage:
     python cli.py
 """
-import os
 import sys
-from pathlib import Path
-
-# Load .env file if it exists
-def load_dotenv():
-    """Load environment variables from .env file."""
-    env_file = Path(__file__).parent / ".env"
-    if env_file.exists():
-        with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, value = line.partition("=")
-                    os.environ.setdefault(key.strip(), value.strip())
-
-load_dotenv()
 
 from config import config as app_config
 from services.kalshi_client import kalshi_service

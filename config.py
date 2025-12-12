@@ -1,12 +1,19 @@
 """
 Configuration settings for Kalshi Market Maker application.
 
-Configuration is loaded from environment variables with sensible defaults.
+Loads settings from environment variables with sensible defaults.
 Copy .env.example to .env and customize for your setup.
 """
 import os
 from dataclasses import dataclass, field
 from typing import Optional
+
+# Load environment variables from .env file if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed, use system env vars
 
 
 def _get_env(key: str, default: str = "") -> str:
@@ -28,7 +35,7 @@ def _get_env_int(key: str, default: int) -> int:
     """Get integer environment variable."""
     try:
         return int(os.environ.get(key, default))
-    except (TypeError, ValueError):
+    except (ValueError, TypeError):
         return default
 
 
@@ -36,7 +43,7 @@ def _get_env_float(key: str, default: float) -> float:
     """Get float environment variable."""
     try:
         return float(os.environ.get(key, default))
-    except (TypeError, ValueError):
+    except (ValueError, TypeError):
         return default
 
 
@@ -44,99 +51,76 @@ def _get_env_float(key: str, default: float) -> float:
 class KalshiConfig:
     """Kalshi API configuration."""
     # API endpoints
-    base_url: str = "https://api.elections.kalshi.com/trade-api/v2"
-    ws_url: str = "wss://api.elections.kalshi.com/trade-api/ws/v2"
+    base_url: str = field(default_factory=lambda: _get_env(
+        "KALSHI_BASE_URL", 
+        "https://api.elections.kalshi.com/trade-api/v2"
+    ))
+    ws_url: str = field(default_factory=lambda: _get_env(
+        "KALSHI_WS_URL",
+        "wss://api.elections.kalshi.com/trade-api/ws/v2"
+    ))
     
-    # Production credentials (loaded from environment)
-    prod_api_key_id: str = field(
-        default_factory=lambda: _get_env("KALSHI_PROD_API_KEY_ID", "")
-    )
-    prod_key_file: str = "private_key.pem"
+    # API Key (from environment)
+    api_key_id: str = field(default_factory=lambda: _get_env("KALSHI_API_KEY_ID", ""))
+    key_file: str = field(default_factory=lambda: _get_env("KALSHI_PRIVATE_KEY_FILE", "private_key.pem"))
     
-    # Demo credentials (loaded from environment)
-    demo_api_key_id: str = field(
-        default_factory=lambda: _get_env("KALSHI_DEMO_API_KEY_ID", "")
-    )
-    demo_key_file: str = "private_demo_key.pem"
+    # Environment toggle (kept for backwards compatibility)
+    use_prod: bool = field(default_factory=lambda: _get_env("KALSHI_ENVIRONMENT", "production").lower() == "production")
     
-    # Environment toggle (default to demo for safety)
-    use_prod: bool = field(
-        default_factory=lambda: _get_env("KALSHI_ENV", "demo").lower() == "prod"
-    )
-    
-    @property
-    def api_key_id(self) -> str:
-        return self.prod_api_key_id if self.use_prod else self.demo_api_key_id
-    
-    @property
-    def key_file(self) -> str:
-        return self.prod_key_file if self.use_prod else self.demo_key_file
+    def __post_init__(self):
+        if not self.api_key_id:
+            raise ValueError(
+                "KALSHI_API_KEY_ID environment variable is required. "
+                "Set it in your .env file or environment."
+            )
 
 
 @dataclass
 class RiskConfig:
     """Risk management configuration."""
     # Position limits
-    max_position_per_market: int = field(
-        default_factory=lambda: _get_env_int("MAX_POSITION_PER_MARKET", 100)
-    )
-    max_total_position: int = field(
-        default_factory=lambda: _get_env_int("MAX_TOTAL_POSITION", 500)
-    )
-    max_daily_loss: float = field(
-        default_factory=lambda: _get_env_float("MAX_DAILY_LOSS", 50.00)
-    )
+    max_position_per_market: int = field(default_factory=lambda: _get_env_int("MAX_POSITION_PER_MARKET", 100))
+    max_total_position: int = field(default_factory=lambda: _get_env_int("MAX_TOTAL_POSITION", 500))
+    max_daily_loss: float = field(default_factory=lambda: _get_env_float("MAX_DAILY_LOSS", 50.00))
     
     # Inventory management
-    inventory_skew_factor: float = 0.5  # Cents to skew per contract of inventory
-    max_inventory_skew: int = 10  # Max cents to skew
+    inventory_skew_factor: float = field(default_factory=lambda: _get_env_float("INVENTORY_SKEW_FACTOR", 0.5))
+    max_inventory_skew: int = field(default_factory=lambda: _get_env_int("MAX_INVENTORY_SKEW", 10))
     
     # Time-based risk
-    hours_before_settlement_exit: float = 4.0  # Exit positions before settlement
+    hours_before_settlement_exit: float = field(default_factory=lambda: _get_env_float("HOURS_BEFORE_SETTLEMENT_EXIT", 4.0))
     
     # Order sizing
-    default_order_size: int = field(
-        default_factory=lambda: _get_env_int("DEFAULT_ORDER_SIZE", 10)
-    )
-    max_order_size: int = 50  # Max contracts per order
+    default_order_size: int = field(default_factory=lambda: _get_env_int("DEFAULT_ORDER_SIZE", 10))
+    max_order_size: int = field(default_factory=lambda: _get_env_int("MAX_ORDER_SIZE", 50))
 
 
 @dataclass  
 class StrategyConfig:
     """Market making strategy configuration."""
     # Target series
-    target_series: str = field(
-        default_factory=lambda: _get_env("TARGET_SERIES", "KXHIGHNY")
-    )
+    target_series: str = field(default_factory=lambda: _get_env("TARGET_SERIES", "KXHIGHNY"))
     
     # Spread configuration
-    min_spread: int = field(
-        default_factory=lambda: _get_env_int("MIN_SPREAD", 5)
-    )
-    default_spread: int = 6  # Default half-spread on each side
+    min_spread: int = field(default_factory=lambda: _get_env_int("MIN_SPREAD", 5))
+    default_spread: int = field(default_factory=lambda: _get_env_int("DEFAULT_SPREAD", 6))
     
     # Quote behavior
-    quote_refresh_interval: float = 5.0  # Seconds between quote updates
-    requote_on_fill: bool = True  # Immediately requote after a fill
+    quote_refresh_interval: float = field(default_factory=lambda: _get_env_float("QUOTE_REFRESH_INTERVAL", 5.0))
+    requote_on_fill: bool = field(default_factory=lambda: _get_env_bool("REQUOTE_ON_FILL", True))
     
     # Fair value
-    use_weather_fair_value: bool = True  # Use weather API for pricing
-    fair_value_confidence_threshold: float = 0.7  # Min confidence to use model FV
+    use_weather_fair_value: bool = field(default_factory=lambda: _get_env_bool("USE_WEATHER_FAIR_VALUE", True))
+    fair_value_confidence_threshold: float = field(default_factory=lambda: _get_env_float("FAIR_VALUE_CONFIDENCE_THRESHOLD", 0.7))
 
 
 @dataclass
 class FlaskConfig:
     """Flask application configuration."""
-    secret_key: str = field(default_factory=lambda: os.urandom(24).hex())
-    debug: bool = field(
-        default_factory=lambda: _get_env_bool("FLASK_DEBUG", True)
-    )
-    host: str = field(
-        default_factory=lambda: _get_env("FLASK_HOST", "127.0.0.1")
-    )
-    port: int = field(
-        default_factory=lambda: _get_env_int("FLASK_PORT", 5000)
-    )
+    secret_key: str = field(default_factory=lambda: _get_env("FLASK_SECRET_KEY", "") or os.urandom(24).hex())
+    debug: bool = field(default_factory=lambda: _get_env_bool("FLASK_DEBUG", True))
+    host: str = field(default_factory=lambda: _get_env("FLASK_HOST", "127.0.0.1"))
+    port: int = field(default_factory=lambda: _get_env_int("FLASK_PORT", 5000))
 
 
 @dataclass

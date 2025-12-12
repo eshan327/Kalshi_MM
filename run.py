@@ -5,23 +5,7 @@ Kalshi Market Maker - Main Entry Point
 Run this script to start the Flask web application and market maker.
 """
 import logging
-import os
 import sys
-from pathlib import Path
-
-# Load .env file if it exists
-def load_dotenv():
-    """Load environment variables from .env file."""
-    env_file = Path(__file__).parent / ".env"
-    if env_file.exists():
-        with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, value = line.partition("=")
-                    os.environ.setdefault(key.strip(), value.strip())
-
-load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -54,6 +38,7 @@ def initialize_services():
             private_key = f.read()
     except FileNotFoundError:
         logger.error(f"Private key file not found: {key_file}")
+        logger.error("Set KALSHI_PRIVATE_KEY_FILE env var or place private_key.pem in project root")
         return False
     
     orderbook_service.initialize(private_key)
