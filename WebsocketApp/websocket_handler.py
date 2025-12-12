@@ -297,6 +297,8 @@ class KalshiWebSocketHandler:
         market.ticker = data
         market.last_update = int(time.time() * 1000)
         
+        bid = None
+        ask = None
         if 'yes_bid' in data and 'yes_ask' in data:
             try:
                 bid, ask = float(data['yes_bid']), float(data['yes_ask'])
@@ -307,6 +309,10 @@ class KalshiWebSocketHandler:
                 pass
         
         self._store_price_data(market_id, market.yes_price, market.no_price)
+        
+        # Check stop loss if we have bid/ask prices
+        if bid is not None and ask is not None:
+            await self._check_stop_loss(market_id, bid, ask)
         
         if market.yes_price is not None:
             for cb in self.message_callbacks:
@@ -500,6 +506,85 @@ class KalshiWebSocketHandler:
         await self.disconnect()
         await asyncio.sleep(1)
         await self.connect()
+    
+    async def _check_stop_loss(self, market_id: str, current_bid: float, current_ask: float):
+        """Check if stop loss conditions are met and execute stop loss orders"""
+        try:
+            # Path to stop loss file
+            stoploss_dir = os.path.join(project_root, "Stoploss")
+            stoploss_file = os.path.join(stoploss_dir, f"{market_id}.json")
+            
+            # Check if stop loss file exists
+            if not os.path.exists(stoploss_file):
+                return
+            
+            # Read stop loss data
+            with open(stoploss_file, 'r') as f:
+                stoploss_data = json.load(f)
+            
+            # Check if stop loss is still active
+            if not stoploss_data.get('active', True):
+                return
+            
+            buy_stop_loss_price = stoploss_data.get('buy_stop_loss_price')
+            sell_stop_loss_price = stoploss_data.get('sell_stop_loss_price')
+            contracts = stoploss_data.get('contracts', 1)
+            
+            if buy_stop_loss_price is None or sell_stop_loss_price is None:
+                return
+            
+            # Check if ask price exceeds buy stop loss trigger
+            # Buy stop loss: if ask > (original_sell_price + stop_loss), buy to cover
+            original_sell_price = stoploss_data.get('sell_price_cents')
+            if original_sell_price and current_ask > original_sell_price + stoploss_data.get('stop_loss_cents', 0):
+                # Trigger buy stop loss
+                try:
+                    buy_order = self.api_client.create_order(
+                        ticker=market_id,
+                        side="yes",
+                        action="buy",
+                        count=contracts,
+                        type="limit",
+                        yes_price=int(buy_stop_loss_price)
+                    )
+                    if buy_order:
+                        self.add_log('warning', f'Stop loss BUY order executed for {market_id} at {buy_stop_loss_price}¢ (ask was {current_ask}¢)')
+                        stoploss_data['active'] = False
+                        stoploss_data['buy_stop_loss_executed'] = True
+                        stoploss_data['buy_stop_loss_executed_at'] = datetime.now().isoformat()
+                        with open(stoploss_file, 'w') as f:
+                            json.dump(stoploss_data, f, indent=2)
+                except Exception as e:
+                    self.add_log('error', f'Error executing buy stop loss for {market_id}: {e}')
+            
+            # Check if bid price drops below sell stop loss trigger
+            # Sell stop loss: if bid < (original_buy_price - stop_loss), sell to limit loss
+            original_buy_price = stoploss_data.get('buy_price_cents')
+            if original_buy_price and current_bid < original_buy_price - stoploss_data.get('stop_loss_cents', 0):
+                # Trigger sell stop loss
+                try:
+                    sell_order = self.api_client.create_order(
+                        ticker=market_id,
+                        side="yes",
+                        action="sell",
+                        count=contracts,
+                        type="limit",
+                        yes_price=int(sell_stop_loss_price)
+                    )
+                    if sell_order:
+                        self.add_log('warning', f'Stop loss SELL order executed for {market_id} at {sell_stop_loss_price}¢ (bid was {current_bid}¢)')
+                        stoploss_data['active'] = False
+                        stoploss_data['sell_stop_loss_executed'] = True
+                        stoploss_data['sell_stop_loss_executed_at'] = datetime.now().isoformat()
+                        with open(stoploss_file, 'w') as f:
+                            json.dump(stoploss_data, f, indent=2)
+                except Exception as e:
+                    self.add_log('error', f'Error executing sell stop loss for {market_id}: {e}')
+                    
+        except Exception as e:
+            # Don't log errors for missing files, but log other errors
+            if 'No such file' not in str(e):
+                self.add_log('error', f'Error checking stop loss for {market_id}: {e}')
     
     def clear_logs(self):
         self.logs.clear()

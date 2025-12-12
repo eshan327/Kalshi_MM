@@ -780,10 +780,11 @@ class KalshiDashboard {
         // Market Maker Controls Section
         const marketSelect = document.getElementById('mm-market-select');
         const mmBankrollInput = document.getElementById('mm-bankroll-input');
+        const mmStopLossInput = document.getElementById('mm-stop-loss-input');
         const startMMBtn = document.getElementById('start-market-maker-btn');
         const mmStatusDiv = document.getElementById('market-maker-status');
         
-        if (!findBtn || !marketSelect || !mmBankrollInput || !startMMBtn) return;
+        if (!findBtn || !marketSelect || !mmBankrollInput || !mmStopLossInput || !startMMBtn) return;
         
         // Update market select when subscribed markets change
         this.updateMarketMakerSelect = () => {
@@ -831,8 +832,9 @@ class KalshiDashboard {
         startMMBtn.addEventListener('click', () => {
             const marketId = marketSelect.value;
             const bankroll = parseFloat(mmBankrollInput.value);
+            const stopLoss = parseFloat(mmStopLossInput.value) || 0;
             if (marketId && bankroll > 0) {
-                this.startMarketMaking(marketId, bankroll, mmStatusDiv);
+                this.startMarketMaking(marketId, bankroll, stopLoss, mmStatusDiv);
             }
         });
         
@@ -906,12 +908,13 @@ class KalshiDashboard {
         });
     }
     
-    startMarketMaking(marketId, bankroll, statusDiv) {
+    startMarketMaking(marketId, bankroll, stopLoss, statusDiv) {
         // Show confirmation dialog
         const confirmed = confirm(
             `Are you sure you want to start market making?\n\n` +
             `Market: ${marketId}\n` +
-            `Bankroll: $${bankroll.toFixed(2)}\n\n` +
+            `Bankroll: $${bankroll.toFixed(2)}\n` +
+            `Stop Loss: ${stopLoss} cents\n\n` +
             `This will place real orders using actual money.`
         );
         
@@ -923,10 +926,10 @@ class KalshiDashboard {
         }
         
         // Show loading status
-        statusDiv.textContent = `Starting market making for ${marketId} with bankroll: $${bankroll.toFixed(2)}...`;
+        statusDiv.textContent = `Starting market making for ${marketId} with bankroll: $${bankroll.toFixed(2)} and stop loss: ${stopLoss} cents...`;
         statusDiv.className = 'opportunities-status info';
         
-        this.addLog('info', `Starting market making for ${marketId} with bankroll: $${bankroll.toFixed(2)}`);
+        this.addLog('info', `Starting market making for ${marketId} with bankroll: $${bankroll.toFixed(2)} and stop loss: ${stopLoss} cents`);
         
         // Call backend API to start market making
         fetch('/api/start-market-making', {
@@ -936,7 +939,8 @@ class KalshiDashboard {
             },
             body: JSON.stringify({
                 market_id: marketId,
-                bankroll: bankroll
+                bankroll: bankroll,
+                stop_loss: stopLoss
             })
         })
         .then(response => response.json())

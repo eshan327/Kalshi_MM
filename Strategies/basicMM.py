@@ -68,21 +68,21 @@ class BasicMM:
                     response = self.client.get_markets(**params)
                     consecutive_errors = 0  # Reset error counter on success
 
-                    if hasattr(response, 'markets') and response.markets:
-                        all_markets.extend(response.markets)
-                        page_count += 1
+                if hasattr(response, 'markets') and response.markets:
+                    all_markets.extend(response.markets)
+                    page_count += 1
                         # Print progress every 10 pages
-                        if page_count % 10 == 0:
+                    if page_count % 10 == 0:
                             print(f"Fetched {len(all_markets)} markets so far (page {page_count}, {skipped_markets} markets skipped due to errors)...")
                     
                         # Get cursor for next page
-                        if hasattr(response, 'cursor') and response.cursor:
-                            cursor = response.cursor
+                if hasattr(response, 'cursor') and response.cursor:
+                    cursor = response.cursor
                             self.last_cursor = cursor
-                        else:
+                else:
                             self.last_cursor = None
                             break
-                    else:
+                else:
                         # No more markets
                         self.last_cursor = None
                         break
@@ -158,10 +158,10 @@ class BasicMM:
                                 
                                 # Continue to next iteration with updated cursor
                                 continue
-                            else:
+                else:
                                 # No more markets
                                 self.last_cursor = None
-                                break
+                    break
 
                         except Exception as http_error:
                             print(f"Raw HTTP request also failed: {http_error}")
@@ -496,7 +496,7 @@ class BasicMM:
             return None, None
 
 # executes market making trades for all markets in market_id_list.  Bankroll is the amount of money to be used.
-    def trade(self, market_id_list, bankroll): 
+    def trade(self, market_id_list, bankroll, stop_loss=0): 
         print("--- WARNING: trading with actual money ---")
         print(f"\n{'='*80}")
         print(f"TRADING SESSION STARTED")
@@ -695,14 +695,14 @@ class BasicMM:
 
                 # Cancel any partial orders if one failed
                 try:
-                    if buy_order:
+                if buy_order:
                             order_id = (getattr(buy_order, 'order_id', None) or 
                                     getattr(buy_order, 'id', None) or 
                                     getattr(buy_order, 'orderId', None))
                             if order_id:
                                 self.client.cancel_order(order_id)
                                 print(f"  Cancelled buy order {order_id}")
-                    if sell_order:
+                if sell_order:
                             order_id = (getattr(sell_order, 'order_id', None) or 
                                     getattr(sell_order, 'id', None) or 
                                     getattr(sell_order, 'orderId', None))
@@ -723,6 +723,51 @@ class BasicMM:
                 print(f"✓ Successfully placed both orders for {market_id}")
                 print(f"  Buy order @ {buy_price_cents}¢: {buy_order_id}")
                 print(f"  Sell order @ {sell_price_cents}¢: {sell_order_id}")
+                
+                # Create stop loss file if stop_loss is specified
+                if stop_loss > 0:
+                    try:
+                        # Create Stoploss directory
+                        stoploss_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Stoploss")
+                        os.makedirs(stoploss_dir, exist_ok=True)
+                        
+                        # Calculate stop loss prices
+                        # Buy stop loss: if ask price exceeds (sell_price_cents + stop_loss), buy to cover
+                        # Sell stop loss: if bid price drops below (buy_price_cents - stop_loss), sell to limit loss
+                        buy_stop_loss_price = sell_price_cents + stop_loss
+                        sell_stop_loss_price = buy_price_cents - stop_loss
+                        
+                        # Clamp prices to valid range (1-99)
+                        buy_stop_loss_price = max(1, min(99, buy_stop_loss_price))
+                        sell_stop_loss_price = max(1, min(99, sell_stop_loss_price))
+                        
+                        # Create stop loss data
+                        stoploss_data = {
+                            'market_id': market_id,
+                            'stop_loss_cents': stop_loss,
+                            'buy_price_cents': buy_price_cents,
+                            'sell_price_cents': sell_price_cents,
+                            'buy_stop_loss_price': buy_stop_loss_price,
+                            'sell_stop_loss_price': sell_stop_loss_price,
+                            'contracts': contracts_per_order,
+                            'buy_order_id': buy_order_id if buy_order_id != 'N/A' else None,
+                            'sell_order_id': sell_order_id if sell_order_id != 'N/A' else None,
+                            'created_at': datetime.datetime.now().isoformat(),
+                            'active': True
+                        }
+                        
+                        # Write to file (market name as filename)
+                        stoploss_file = os.path.join(stoploss_dir, f"{market_id}.json")
+                        with open(stoploss_file, 'w') as f:
+                            json.dump(stoploss_data, f, indent=2)
+                        
+                        print(f"✓ Stop loss file created for {market_id}")
+                        print(f"  Buy stop loss trigger: {buy_stop_loss_price}¢ (if ask > {sell_price_cents + stop_loss}¢)")
+                        print(f"  Sell stop loss trigger: {sell_stop_loss_price}¢ (if bid < {buy_price_cents - stop_loss}¢)")
+                    except Exception as e:
+                        print(f"⚠ Error creating stop loss file for {market_id}: {e}")
+                        import traceback
+                        traceback.print_exc()
         
         # Print summary of trading session
         print(f"\n{'='*80}")

@@ -303,12 +303,16 @@ def start_market_making():
         data = request.get_json()
         market_id = data.get('market_id')
         bankroll = data.get('bankroll')  # Bankroll in dollars
+        stop_loss = data.get('stop_loss', 0)  # Stop loss in cents, default 0
         
         if not market_id:
             return jsonify({'error': 'Market ID is required', 'success': False}), 400
         
         if not bankroll or bankroll <= 0:
             return jsonify({'error': 'Valid bankroll amount is required', 'success': False}), 400
+        
+        if stop_loss < 0:
+            return jsonify({'error': 'Stop loss must be non-negative', 'success': False}), 400
         
         # Import BasicMM
         from Strategies.basicMM import BasicMM
@@ -335,12 +339,13 @@ def start_market_making():
         
         # Convert bankroll from dollars to cents (trade function expects cents)
         bankroll_cents = int(bankroll * 100)
+        stop_loss_cents = int(stop_loss)  # Stop loss is already in cents
         
-        print(f"Starting market making for {market_id} with bankroll ${bankroll} (${bankroll_cents} cents) in {mode_str} mode")
+        print(f"Starting market making for {market_id} with bankroll ${bankroll} (${bankroll_cents} cents) and stop loss {stop_loss_cents} cents in {mode_str} mode")
         
         # Call trade function with single market ID (trade accepts both market objects and strings)
         # The trade function will handle getting prices and placing orders
-        mm.trade([market_id], bankroll_cents)
+        mm.trade([market_id], bankroll_cents, stop_loss=stop_loss_cents)
         
         return jsonify({
             'success': True,
