@@ -15,7 +15,6 @@ from config import config as app_config
 from services.kalshi_client import kalshi_service, OrderResult
 from services.orderbook import orderbook_service, Orderbook
 from services.risk_manager import risk_manager
-from services.fair_value import fair_value_calculator, FairValueResult
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +46,6 @@ class MarketState:
     title: str
     is_active: bool = True
     current_quote: Optional[Quote] = None
-    fair_value: Optional[FairValueResult] = None
     last_quote_time: Optional[datetime] = None
     bid_order_id: Optional[str] = None
     ask_order_id: Optional[str] = None
@@ -98,17 +96,27 @@ class MarketMaker:
             logger.error("Kalshi service not initialized")
             return False
         
-        # Load target series markets
-        series = app_config.strategy.target_series
-        markets = kalshi_service.get_markets(series_ticker=series, status="open")
+        # Load target series markets (supports multiple series)
+        series_list = app_config.strategy.target_series
+        if isinstance(series_list, str):
+            series_list = [series_list]  # Backwards compatibility
         
-        if not markets:
-            logger.warning(f"No open markets found for series {series}")
+        all_markets = []
+        for series in series_list:
+            markets = kalshi_service.get_markets(series_ticker=series, status="open")
+            if markets:
+                all_markets.extend(markets)
+                logger.info(f"Found {len(markets)} open markets for series {series}")
+            else:
+                logger.warning(f"No open markets found for series {series}")
+        
+        if not all_markets:
+            logger.warning(f"No open markets found for any target series")
             return False
         
         with self._lock:
             self._markets.clear()
-            for m in markets:
+            for m in all_markets:
                 ticker = m['ticker']
                 self._markets[ticker] = MarketState(
                     ticker=ticker,
@@ -116,7 +124,7 @@ class MarketMaker:
                     close_time=m.get('close_time'),
                 )
         
-        logger.info(f"Initialized with {len(self._markets)} markets")
+        logger.info(f"Initialized with {len(self._markets)} markets across {len(series_list)} series")
         return True
     
     def start(self):
@@ -200,9 +208,6 @@ class MarketMaker:
             logger.debug("Trading halted, skipping quote cycle")
             return
         
-        # Update fair values
-        self._update_fair_values()
-        
         # Quote each market
         with self._lock:
             markets_to_quote = list(self._markets.values())
@@ -215,24 +220,6 @@ class MarketMaker:
                 self._quote_market(market)
             except Exception as e:
                 logger.error(f"Error quoting {market.ticker}: {e}")
-    
-    def _update_fair_values(self):
-        """Update fair values for all markets."""
-        with self._lock:
-            markets_list = [
-                {'ticker': m.ticker, 'title': m.title}
-                for m in self._markets.values()
-            ]
-        
-        if not app_config.strategy.use_weather_fair_value:
-            return
-        
-        fair_values = fair_value_calculator.calculate_all_fair_values(markets_list)
-        
-        with self._lock:
-            for ticker, fv in fair_values.items():
-                if ticker in self._markets:
-                    self._markets[ticker].fair_value = fv
     
     def _quote_market(self, market: MarketState):
         """Generate and send quotes for a single market."""
@@ -256,10 +243,28 @@ class MarketMaker:
             if not ob_data:
                 return
         
+        # Check stop-loss using current mid price
+        current_mid = orderbook.mid if orderbook and orderbook.mid else None
+        if current_mid and risk_manager.check_stop_loss(market.ticker, current_mid):
+            logger.warning(f"Stop-loss triggered for {market.ticker} - exiting position")
+            self._cancel_market_quotes(market)
+            self._force_exit_position(market)
+            market.is_active = False
+            return
+        
+        # Check if forced unwind needed
+        if risk_manager.needs_forced_unwind(market.ticker):
+            logger.warning(f"Forced unwind triggered for {market.ticker} - position too large")
+            self._force_exit_position(market)
+            # Don't deactivate - keep quoting but only the reducing side
+        
         # Calculate quote prices
         quote = self._calculate_quote(market, orderbook)
         if not quote:
             return
+        
+        # Check if we should only quote one side (high inventory)
+        one_side = risk_manager.should_one_side_quote(market.ticker)
         
         # Check risk before placing orders
         can_bid, bid_reason = risk_manager.can_place_order(
@@ -268,6 +273,14 @@ class MarketMaker:
         can_ask, ask_reason = risk_manager.can_place_order(
             market.ticker, 'yes', 'sell', quote.ask_size
         )
+        
+        # Apply one-sided quoting constraint
+        if one_side == 'ask':
+            can_bid = False  # Only allow asks (we're long)
+            logger.debug(f"{market.ticker}: One-sided quoting - ask only (long position)")
+        elif one_side == 'bid':
+            can_ask = False  # Only allow bids (we're short)
+            logger.debug(f"{market.ticker}: One-sided quoting - bid only (short position)")
         
         # Cancel existing orders if prices changed
         if market.current_quote:
@@ -313,31 +326,45 @@ class MarketMaker:
         """
         Calculate bid and ask prices for a market.
         
-        Strategy:
-        1. Start with fair value (from weather) or mid price
-        2. Apply half-spread on each side
-        3. Adjust for inventory skew
-        4. Ensure prices are within 1-99 range
+        Strategy (Spread Capture):
+        1. Get best bid/ask from orderbook
+        2. Place our bid at or just above best bid (undercut by 1¢)
+        3. Place our ask at or just below best ask (undercut by 1¢)
+        4. Adjust for inventory skew
+        5. Ensure minimum spread maintained
         """
-        # Determine base price (fair value or orderbook mid)
-        if market.fair_value and market.fair_value.confidence >= app_config.strategy.fair_value_confidence_threshold:
-            base_price = market.fair_value.fair_value
-        elif orderbook and orderbook.mid:
-            base_price = orderbook.mid
-        else:
-            # Default to 50 if no information
-            base_price = 50
+        # Need orderbook for spread capture strategy
+        if not orderbook:
+            return None
         
-        # Get half spread
-        half_spread = app_config.strategy.default_spread
+        best_bid = orderbook.best_bid
+        best_ask = orderbook.best_ask
+        
+        # If no orderbook depth, use mid or default
+        if best_bid is None and best_ask is None:
+            half_spread = app_config.strategy.default_spread // 2
+            bid_price = 50 - half_spread
+            ask_price = 50 + half_spread
+        elif best_bid is None:
+            # Only asks in book - bid below the ask
+            ask_price = best_ask - 1  # Undercut
+            bid_price = ask_price - app_config.strategy.min_spread
+        elif best_ask is None:
+            # Only bids in book - ask above the bid  
+            bid_price = best_bid + 1  # Undercut
+            ask_price = bid_price + app_config.strategy.min_spread
+        else:
+            # Both sides have depth - undercut both
+            bid_price = best_bid + 1  # Place just above best bid
+            ask_price = best_ask - 1  # Place just below best ask
         
         # Get inventory skew
         skew = risk_manager.get_inventory_skew(market.ticker)
         
-        # Calculate prices
+        # Apply skew
         # Skew > 0 means we're long, so bid lower and ask lower to reduce position
-        bid_price = int(round(base_price - half_spread - skew))
-        ask_price = int(round(base_price + half_spread - skew))
+        bid_price = bid_price - skew
+        ask_price = ask_price - skew
         
         # Ensure minimum spread
         if ask_price - bid_price < app_config.strategy.min_spread:
@@ -361,7 +388,6 @@ class MarketMaker:
             bid_size=app_config.risk.default_order_size,
             ask_price=ask_price,
             ask_size=app_config.risk.default_order_size,
-            fair_value=base_price,
         )
     
     def _cancel_market_quotes(self, market: MarketState):
@@ -373,6 +399,56 @@ class MarketMaker:
         if market.ask_order_id:
             kalshi_service.cancel_order(market.ask_order_id)
             market.ask_order_id = None
+    
+    def _force_exit_position(self, market: MarketState):
+        """
+        Force exit a position by placing aggressive market-taking orders.
+        Used for stop-loss and forced unwind scenarios.
+        """
+        mr = risk_manager.get_market_risk(market.ticker)
+        if not mr or mr.position == 0:
+            return
+        
+        # Get current orderbook for pricing
+        orderbook = orderbook_service.get_orderbook(market.ticker)
+        if not orderbook:
+            logger.error(f"Cannot force exit {market.ticker} - no orderbook")
+            return
+        
+        position = mr.position
+        
+        if position > 0:
+            # We're long - need to sell
+            # Place aggressive sell order at best bid (take the bid)
+            exit_price = orderbook.best_bid if orderbook.best_bid else 1
+            result = kalshi_service.create_order(
+                ticker=market.ticker,
+                action='sell',
+                side='yes',
+                count=abs(position),
+                order_type='limit',
+                price=exit_price,
+            )
+            if result.success:
+                logger.info(f"Force exit: SELL {abs(position)} {market.ticker} @ {exit_price}¢")
+            else:
+                logger.error(f"Force exit failed for {market.ticker}: {result.error}")
+        else:
+            # We're short (long NO) - need to buy back
+            # Place aggressive buy order at best ask (take the ask)
+            exit_price = orderbook.best_ask if orderbook.best_ask else 99
+            result = kalshi_service.create_order(
+                ticker=market.ticker,
+                action='buy',
+                side='yes',
+                count=abs(position),
+                order_type='limit',
+                price=exit_price,
+            )
+            if result.success:
+                logger.info(f"Force exit: BUY {abs(position)} {market.ticker} @ {exit_price}¢")
+            else:
+                logger.error(f"Force exit failed for {market.ticker}: {result.error}")
     
     def _cancel_all_quotes(self):
         """Cancel all outstanding quotes."""

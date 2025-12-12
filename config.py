@@ -83,9 +83,16 @@ class RiskConfig:
     max_total_position: int = field(default_factory=lambda: _get_env_int("MAX_TOTAL_POSITION", 500))
     max_daily_loss: float = field(default_factory=lambda: _get_env_float("MAX_DAILY_LOSS", 50.00))
     
+    # Stop-loss protection
+    max_adverse_move: int = field(default_factory=lambda: _get_env_int("MAX_ADVERSE_MOVE", 10))  # Cents - trigger exit if price moves against us
+    stop_loss_enabled: bool = field(default_factory=lambda: _get_env_bool("STOP_LOSS_ENABLED", True))
+    
     # Inventory management
     inventory_skew_factor: float = field(default_factory=lambda: _get_env_float("INVENTORY_SKEW_FACTOR", 0.5))
     max_inventory_skew: int = field(default_factory=lambda: _get_env_int("MAX_INVENTORY_SKEW", 10))
+    inventory_skew_exponential: bool = field(default_factory=lambda: _get_env_bool("INVENTORY_SKEW_EXPONENTIAL", True))  # Use exponential instead of linear skew
+    max_inventory_position: int = field(default_factory=lambda: _get_env_int("MAX_INVENTORY_POSITION", 50))  # Trigger forced unwind above this
+    one_sided_quoting_threshold: int = field(default_factory=lambda: _get_env_int("ONE_SIDED_QUOTING_THRESHOLD", 40))  # Only quote reducing side above this
     
     # Time-based risk
     hours_before_settlement_exit: float = field(default_factory=lambda: _get_env_float("HOURS_BEFORE_SETTLEMENT_EXIT", 4.0))
@@ -98,8 +105,8 @@ class RiskConfig:
 @dataclass  
 class StrategyConfig:
     """Market making strategy configuration."""
-    # Target series
-    target_series: str = field(default_factory=lambda: _get_env("TARGET_SERIES", "KXHIGHNY"))
+    # Target series (comma-separated for multiple, e.g., "KXHIGHNY,INBA-WINNER")
+    target_series: list = field(default_factory=lambda: [s.strip() for s in _get_env("TARGET_SERIES", "KXHIGHNY").split(",") if s.strip()])
     
     # Spread configuration
     min_spread: int = field(default_factory=lambda: _get_env_int("MIN_SPREAD", 5))

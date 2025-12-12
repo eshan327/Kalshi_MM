@@ -11,6 +11,7 @@ from threading import Lock
 
 from config import config as app_config
 from services.kalshi_client import kalshi_service, Position
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,8 @@ class MarketRisk:
     unrealized_pnl: float = 0.0
     open_buy_orders: int = 0
     open_sell_orders: int = 0
+    last_price: float = 0.0  # Track current market price for stop-loss
+    stop_loss_triggered: bool = False  # Flag when stop-loss fires
     
     @property
     def net_exposure(self) -> int:
@@ -35,6 +38,19 @@ class MarketRisk:
     def total_pnl(self) -> float:
         """Total P&L (realized + unrealized)."""
         return self.realized_pnl + self.unrealized_pnl
+    
+    @property
+    def adverse_move(self) -> float:
+        """Calculate how much price has moved against our position (in cents)."""
+        if self.position == 0 or self.avg_entry_price == 0:
+            return 0.0
+        
+        # For long position, adverse = entry - current (price dropped)
+        # For short position, adverse = current - entry (price rose)
+        if self.position > 0:
+            return max(0, self.avg_entry_price - self.last_price)
+        else:
+            return max(0, self.last_price - self.avg_entry_price)
 
 
 @dataclass
@@ -48,6 +64,7 @@ class RiskState:
     is_halted: bool = False
     halt_reason: Optional[str] = None
     last_update: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    stop_loss_exits: List[str] = field(default_factory=list)  # Markets where stop-loss triggered
 
 
 class RiskManager:
@@ -180,14 +197,99 @@ class RiskManager:
             
             position = mr.position
             
-            # Calculate skew
-            skew = int(position * app_config.risk.inventory_skew_factor)
+            # Calculate skew (exponential or linear)
+            if app_config.risk.inventory_skew_exponential:
+                # Exponential: skew increases faster as inventory grows
+                # Formula: sign(pos) * factor * (e^(|pos|/20) - 1)
+                # This gives gentle skew at low inventory, aggressive at high
+                if position == 0:
+                    skew = 0
+                else:
+                    sign = 1 if position > 0 else -1
+                    skew = int(sign * app_config.risk.inventory_skew_factor * (math.exp(abs(position) / 20) - 1))
+            else:
+                # Linear: original behavior
+                skew = int(position * app_config.risk.inventory_skew_factor)
             
             # Cap the skew
             max_skew = app_config.risk.max_inventory_skew
             skew = max(-max_skew, min(max_skew, skew))
             
             return skew
+    
+    def should_one_side_quote(self, ticker: str) -> Optional[str]:
+        """
+        Check if we should only quote one side due to high inventory.
+        
+        Returns:
+            'bid' if we should only bid (we're short, need to buy)
+            'ask' if we should only ask (we're long, need to sell)
+            None if we can quote both sides
+        """
+        with self._lock:
+            mr = self._state.markets.get(ticker)
+            if not mr:
+                return None
+            
+            threshold = app_config.risk.one_sided_quoting_threshold
+            
+            if mr.position >= threshold:
+                return 'ask'  # We're long, only sell
+            elif mr.position <= -threshold:
+                return 'bid'  # We're short, only buy
+            
+            return None
+    
+    def check_stop_loss(self, ticker: str, current_price: float) -> bool:
+        """
+        Check if stop-loss should trigger for a market.
+        
+        Args:
+            ticker: Market ticker
+            current_price: Current market price (mid or last trade)
+            
+        Returns:
+            True if stop-loss triggered (should exit position)
+        """
+        if not app_config.risk.stop_loss_enabled:
+            return False
+        
+        with self._lock:
+            mr = self._state.markets.get(ticker)
+            if not mr or mr.position == 0:
+                return False
+            
+            # Update last price
+            mr.last_price = current_price
+            
+            # Check adverse move
+            adverse = mr.adverse_move
+            if adverse >= app_config.risk.max_adverse_move:
+                if not mr.stop_loss_triggered:
+                    mr.stop_loss_triggered = True
+                    self._state.stop_loss_exits.append(ticker)
+                    logger.warning(
+                        f"STOP-LOSS triggered for {ticker}: "
+                        f"entry={mr.avg_entry_price:.0f}¢, current={current_price:.0f}¢, "
+                        f"adverse={adverse:.0f}¢, position={mr.position}"
+                    )
+                return True
+            
+            return False
+    
+    def needs_forced_unwind(self, ticker: str) -> bool:
+        """
+        Check if position is too large and needs forced unwinding.
+        
+        Returns:
+            True if position exceeds max_inventory_position
+        """
+        with self._lock:
+            mr = self._state.markets.get(ticker)
+            if not mr:
+                return False
+            
+            return abs(mr.position) >= app_config.risk.max_inventory_position
     
     def should_exit_market(self, ticker: str, hours_to_settlement: float) -> bool:
         """Check if we should exit a market due to time-based risk."""
