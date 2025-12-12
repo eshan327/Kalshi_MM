@@ -42,7 +42,7 @@ class BasicMM:
         """Fetch markets with robust pagination.
 
         Args:
-            max_total: Maximum number of markets to collect
+            max_total: Maximum number of markets to collect. If None, fetches all available markets.
             page_size: Number of markets per request (server typically caps at 100)
             status: Market status filter (None to get all tradeable markets)
             start_cursor: Optional cursor to start from (for continuing pagination)
@@ -54,6 +54,9 @@ class BasicMM:
         all_markets = []
         # Use provided cursor, or None to start from beginning
         cursor = start_cursor
+        page_count = 0
+        consecutive_errors = 0
+        max_consecutive_errors = 10  # Stop after too many consecutive errors
 
         while True:
             try:
@@ -64,10 +67,17 @@ class BasicMM:
                     params["cursor"] = cursor
 
                 response = self.client.get_markets(**params)
+                consecutive_errors = 0  # Reset error counter on success
 
                 if hasattr(response, 'markets') and response.markets:
                     all_markets.extend(response.markets)
+                    page_count += 1
+                    # Print progress every 10 pages
+                    if page_count % 10 == 0:
+                        print(f"Fetched {len(all_markets)} markets so far (page {page_count})...")
                 else:
+                    # No more markets
+                    self.last_cursor = None
                     break
 
                 # Continue pagination if a cursor is provided
@@ -80,28 +90,29 @@ class BasicMM:
                     self.last_cursor = None
                     break
 
-                # Stop if we've reached the requested total
-                if len(all_markets) >= max_total:
+                # Stop if we've reached the requested total (only if max_total is not None)
+                if max_total is not None and len(all_markets) >= max_total:
                     break
 
             except Exception as e:
-                print(f"Error fetching markets: {e}")
-                # Fallback: single request without pagination
-                try:
-                    fallback_params = {"limit": min(page_size, 100)}
-                    if status is not None:
-                        fallback_params["status"] = status
-                    if cursor:
-                        fallback_params["cursor"] = cursor
-                    response = self.client.get_markets(**fallback_params)
-                    if hasattr(response, 'markets') and response.markets:
-                        all_markets.extend(response.markets)
-                        # Update cursor if available
-                        if hasattr(response, 'cursor') and response.cursor:
-                            self.last_cursor = response.cursor
-                except Exception as fallback_error:
-                    print(f"Fallback also failed: {fallback_error}")
-                break
+                consecutive_errors += 1
+                print(f"Error fetching markets (page {page_count + 1}, error {consecutive_errors}): {e}")
+                
+                # If too many consecutive errors, stop to avoid infinite loop
+                if consecutive_errors >= max_consecutive_errors:
+                    print(f"Too many consecutive errors ({consecutive_errors}). Stopping pagination.")
+                    break
+                
+                # Try to continue with next cursor if we have one
+                # If we don't have a cursor, we can't continue, so break
+                if not cursor:
+                    print("No cursor available to continue after error. Stopping.")
+                    break
+                
+                # Skip this page and try to continue with the next one
+                # The cursor should still be valid for the next iteration
+                print(f"Attempting to continue with next page...")
+                continue
 
         print(f"Successfully fetched {len(all_markets)} valid markets")
         if self.last_cursor:
@@ -404,64 +415,127 @@ class BasicMM:
             buy_price_prob = buy_price_cents / 100.0
             sell_price_prob = sell_price_cents / 100.0
 
-            # Check if we have enough bankroll for both orders
-            # Buy orders cost money (buying yes contracts)
-            # Sell orders also cost money (selling yes = buying no contracts)
+            # Calculate how many contracts we can afford with the available bankroll
+            # Cost per contract pair = buy_price + sell_price (need both for market making)
+            cost_per_contract_pair = buy_price_cents + sell_price_cents
+            
+            if cost_per_contract_pair <= 0:
+                print(f"Error: Invalid prices for market {market_id} (buy: {buy_price_cents}¢, sell: {sell_price_cents}¢). Skipping.")
+                continue
+            
+            # Calculate maximum number of contracts we can afford
+            # Use floor division to ensure we don't exceed bankroll
+            max_contracts = remaining_bankroll // cost_per_contract_pair
+            
+            if max_contracts <= 0:
+                print(f"Insufficient bankroll for market {market_id}. Need at least ${cost_per_contract_pair/100:.2f} per contract pair (buy: {buy_price_cents}¢ + sell: {sell_price_cents}¢), have ${remaining_bankroll/100:.2f}")
+                continue
+            
+            # Use the maximum number of contracts we can afford
+            contracts_per_order = max_contracts
+            
+            # Calculate total cost: price per contract * number of contracts for both buy and sell
+            buy_order_total_cost = buy_price_cents * contracts_per_order
+            sell_order_total_cost = sell_price_cents * contracts_per_order
+            total_cost = buy_order_total_cost + sell_order_total_cost
+            
+            print(f"Calculated contracts for {market_id}: {contracts_per_order} contracts (cost: ${total_cost/100:.2f}, remaining bankroll: ${remaining_bankroll/100:.2f})")
+            
+            # API expects yes_price in cents (1-99), not probability format
+            # Keep prices in cents as returned by get_price
+            
             buy_order = None
             sell_order = None
             
-            total_cost = buy_price_cents + sell_price_cents
-            
-            # Check if we have enough for both orders
-            if remaining_bankroll < total_cost:
-                print(f"Insufficient bankroll for market {market_id}. Need ${total_cost/100:.2f} (buy: ${buy_price_cents/100:.2f} + sell: ${sell_price_cents/100:.2f}), have ${remaining_bankroll/100:.2f}")
-                continue
-            
             # Place buy order (buying yes contracts)
-            if remaining_bankroll >= buy_price_cents:
+            if remaining_bankroll >= buy_order_total_cost:
                 try:
                     buy_order = self.client.create_order(
                         ticker=market_id,
                         side="yes",
                         action="buy",
-                        count=10,
+                        count=contracts_per_order,
                         type="limit",
-                        yes_price=buy_price_cents
+                        yes_price=buy_price_cents  # API expects cents (1-99), not probability
                     )
                     # Subtract from bankroll if order was successfully created
+                    # Total cost = price per contract * number of contracts
                     if buy_order:
-                        remaining_bankroll -= buy_price_cents
-                        print(f"Buy order placed for {market_id} @ {buy_price_cents} cents. Remaining bankroll: ${remaining_bankroll/100:.2f}")
+                        remaining_bankroll -= buy_order_total_cost
+                        # Try to get order ID from various possible attributes
+                        order_id = None
+                        if hasattr(buy_order, 'order_id'):
+                            order_id = buy_order.order_id
+                        elif hasattr(buy_order, 'id'):
+                            order_id = buy_order.id
+                        elif hasattr(buy_order, 'orderId'):
+                            order_id = buy_order.orderId
+                        elif isinstance(buy_order, dict):
+                            order_id = buy_order.get('order_id') or buy_order.get('id') or buy_order.get('orderId')
+                        
+                        print(f"✓ Buy order placed for {market_id}: {contracts_per_order} contracts @ {buy_price_cents}¢ each (total: ${buy_order_total_cost/100:.2f}). Remaining bankroll: ${remaining_bankroll/100:.2f}")
+                        if order_id:
+                            print(f"  Order ID: {order_id}")
+                        else:
+                            # Debug: print order object structure
+                            print(f"  Order object type: {type(buy_order)}")
+                            if hasattr(buy_order, '__dict__'):
+                                print(f"  Order attributes: {list(buy_order.__dict__.keys())}")
+                    else:
+                        print(f"⚠ Buy order returned None for {market_id}")
+                        buy_order = None
                 except Exception as e:
-                    print(f"Error creating buy order for {market_id}: {e}")
+                    print(f"✗ Error creating buy order for {market_id}: {e}")
                     import traceback
                     traceback.print_exc()
                     buy_order = None
             else:
-                print(f"Insufficient bankroll for buy order on {market_id}. Need ${buy_price_cents/100:.2f}, have ${remaining_bankroll/100:.2f}")
+                print(f"Insufficient bankroll for buy order on {market_id}. Need ${buy_order_total_cost/100:.2f} ({contracts_per_order} contracts @ {buy_price_cents}¢ each), have ${remaining_bankroll/100:.2f}")
             
             # Place sell order (selling yes = buying no contracts, also costs money)
-            if remaining_bankroll >= sell_price_cents:
+            if remaining_bankroll >= sell_order_total_cost:
                 try:
                     sell_order = self.client.create_order(
                         ticker=market_id,
                         side="yes",
                         action="sell",
-                        count=10,
+                        count=contracts_per_order,
                         type="limit",
-                        yes_price=sell_price_cents
+                        yes_price=sell_price_cents  # API expects cents (1-99), not probability
                     )
                     # Subtract from bankroll if order was successfully created
+                    # Total cost = price per contract * number of contracts
                     if sell_order:
-                        remaining_bankroll -= sell_price_cents
-                        print(f"Sell order placed for {market_id} @ {sell_price_cents} cents. Remaining bankroll: ${remaining_bankroll/100:.2f}")
+                        remaining_bankroll -= sell_order_total_cost
+                        # Try to get order ID from various possible attributes
+                        order_id = None
+                        if hasattr(sell_order, 'order_id'):
+                            order_id = sell_order.order_id
+                        elif hasattr(sell_order, 'id'):
+                            order_id = sell_order.id
+                        elif hasattr(sell_order, 'orderId'):
+                            order_id = sell_order.orderId
+                        elif isinstance(sell_order, dict):
+                            order_id = sell_order.get('order_id') or sell_order.get('id') or sell_order.get('orderId')
+                        
+                        print(f"✓ Sell order placed for {market_id}: {contracts_per_order} contracts @ {sell_price_cents}¢ each (total: ${sell_order_total_cost/100:.2f}). Remaining bankroll: ${remaining_bankroll/100:.2f}")
+                        if order_id:
+                            print(f"  Order ID: {order_id}")
+                        else:
+                            # Debug: print order object structure
+                            print(f"  Order object type: {type(sell_order)}")
+                            if hasattr(sell_order, '__dict__'):
+                                print(f"  Order attributes: {list(sell_order.__dict__.keys())}")
+                    else:
+                        print(f"⚠ Sell order returned None for {market_id}")
+                        sell_order = None
                 except Exception as e:
-                    print(f"Error creating sell order for {market_id}: {e}")
+                    print(f"✗ Error creating sell order for {market_id}: {e}")
                     import traceback
                     traceback.print_exc()
                     sell_order = None
             else:
-                print(f"Insufficient bankroll for sell order on {market_id}. Need ${sell_price_cents/100:.2f}, have ${remaining_bankroll/100:.2f}")
+                print(f"Insufficient bankroll for sell order on {market_id}. Need ${sell_order_total_cost/100:.2f} ({contracts_per_order} contracts @ {sell_price_cents}¢ each), have ${remaining_bankroll/100:.2f}")
 
             # Log orders
             # Ensure logs/trade_logs directory exists
@@ -475,7 +549,9 @@ class BasicMM:
             file_timestamp = self._session_start_time.strftime("%Y%m%d_%H%M%S")
             log_file = os.path.join(trade_logs_dir, f"tradeLimitOrders_{file_timestamp}.log")
             
-            # Log order details
+            # Log order details (log prices in probability format for consistency with existing logs)
+            buy_price_prob = buy_price_cents / 100.0
+            sell_price_prob = sell_price_cents / 100.0
             with open(log_file, "a") as f:
                 entry_timestamp = datetime.datetime.now().isoformat()
                 if buy_order:
@@ -485,19 +561,41 @@ class BasicMM:
                     sell_order_id = getattr(sell_order, 'order_id', getattr(sell_order, 'id', 'N/A'))
                     f.write(f"{entry_timestamp}, {market_id}, SELL, {sell_price_prob}, {sell_order_id}\n")
             
-            # check both were created
+            # Check both were created
             if not buy_order or not sell_order:
                 print(f"⚠ Failed to create buy or sell order for market {market_id}")
                 failed_markets.append(market_id)
 
-                if buy_order:
-                    self.client.cancel_order(buy_order.id)
-                if sell_order:
-                    self.client.cancel_order(sell_order.id)
+                # Cancel any partial orders if one failed
+                try:
+                    if buy_order:
+                            order_id = (getattr(buy_order, 'order_id', None) or 
+                                    getattr(buy_order, 'id', None) or 
+                                    getattr(buy_order, 'orderId', None))
+                            if order_id:
+                                self.client.cancel_order(order_id)
+                                print(f"  Cancelled buy order {order_id}")
+                    if sell_order:
+                            order_id = (getattr(sell_order, 'order_id', None) or 
+                                    getattr(sell_order, 'id', None) or 
+                                    getattr(sell_order, 'orderId', None))
+                            if order_id:
+                                self.client.cancel_order(order_id)
+                                print(f"  Cancelled sell order {order_id}")
+                except Exception as cancel_error:
+                    print(f"  Warning: Could not cancel partial orders: {cancel_error}")
             else:
                 # Both orders successfully placed
                 successfully_traded_markets.append(market_id)
-                print(f"✓ Successfully placed both orders for {market_id} (Buy @ ${buy_price_cents/100:.2f}, Sell @ ${sell_price_cents/100:.2f})")
+                buy_order_id = (getattr(buy_order, 'order_id', None) or 
+                               getattr(buy_order, 'id', None) or 
+                               getattr(buy_order, 'orderId', None) or 'N/A')
+                sell_order_id = (getattr(sell_order, 'order_id', None) or 
+                                getattr(sell_order, 'id', None) or 
+                                getattr(sell_order, 'orderId', None) or 'N/A')
+                print(f"✓ Successfully placed both orders for {market_id}")
+                print(f"  Buy order @ {buy_price_cents}¢: {buy_order_id}")
+                print(f"  Sell order @ {sell_price_cents}¢: {sell_order_id}")
         
         # Print summary of trading session
         print(f"\n{'='*80}")
@@ -643,73 +741,89 @@ class BasicMM:
             print(f"Error: Could not get prices for market {market_id}. Cannot place orders.")
             return
         
-        self.client.create_order(ticker=market_id,
-                        side="yes",
-                        action="buy",
-                        count=contracts
-                        ,
-                        type="limit",
-                        yes_price=buy_price_cents)
-                        
-        self.client.create_order(ticker=market_id,
-                        side="yes",
-                        action="sell",
-                        count=contracts,
-                        type="limit",
-                        yes_price=sell_price_cents)
+        buy_order = self.client.create_order(
+            ticker=market_id,
+            side="yes",
+            action="buy",
+            count=contracts,
+            type="limit",
+            yes_price=buy_price_cents
+        )
+        
+        sell_order = self.client.create_order(
+            ticker=market_id,
+            side="yes",
+            action="sell",
+            count=contracts,
+            type="limit",
+            yes_price=sell_price_cents
+        )
 
 if __name__ == "__main__":
     mm = BasicMM(reserve_limit=10)
-    mm.identify_market_opportunities(max_total=10000)
-    print(f"\nTotal opportunities found: {len(mm.market_opportunities)}")
-    if mm.market_opportunities:
-        print("Trading...")
-        mm.run_test()
+    
+    # Identify market opportunities from ALL markets on Kalshi
+    # Set max_total=None to fetch all available markets (uses pagination automatically)
+    print("Identifying market opportunities from ALL markets on Kalshi...")
+    print("This will use pagination to fetch all available markets (may take several minutes)...")
+    mm.identify_market_opportunities(max_total=None)  # None = fetch all markets
+    print(f"\nTotal markets analyzed: {len(mm.market_opportunities) if hasattr(mm, 'market_opportunities') else 0}")
+    print(f"Total opportunities identified: {len(mm.market_opportunities)}")
         
-        # Read and display orders that were placed
-        # Find the most recent trade log file in logs/trade_logs directory
-        log_dir = os.path.join(os.path.dirname(__file__), "..", "logs", "trade_logs")
-        log_file = None
+    # Filter for markets with good volume and spread of at least 3 cents (0.03)
+    print("\nFiltering for markets with good volume and spread >= 3 cents...")
+    filtered = mm.filter_market_opportunities(
+        min_spread=0.03,  # 3 cents spread minimum
+        min_volume=1000,  # Good volume threshold
+        max_spread=0.1,   # Maximum spread
+        min_price=0.1     # Minimum price
+    )
+    
+    print(f"\n{'='*100}")
+    print(f"MARKET OPPORTUNITIES (Volume >= 1000, Spread >= 3 cents)")
+    print(f"{'='*100}")
+    print(f"Total filtered opportunities: {len(filtered)}\n")
+    
+    if filtered:
+        # Print header
+        print(f"{'Market ID':<50} {'Title':<40} {'Spread':<10} {'Volume':<12} {'Yes Bid':<10} {'Yes Ask':<10}")
+        print("-" * 100)
         
-        if os.path.exists(log_dir):
-            # Find the most recent trade log file
-            log_files = [f for f in os.listdir(log_dir) if f.startswith("tradeLimitOrders_") and f.endswith(".log")]
-            if log_files:
-                # Sort by modification time, most recent first
-                log_files.sort(key=lambda f: os.path.getmtime(os.path.join(log_dir, f)), reverse=True)
-                log_file = os.path.join(log_dir, log_files[0])
-                print(f"\nUsing most recent trade log: {log_files[0]}")
+        # Sort by spread (highest first) for better visibility
+        sorted_opportunities = sorted(filtered, key=lambda m: mm.get_market_spread(m) or 0, reverse=True)
         
-        if log_file and os.path.exists(log_file):
-            print("\n" + "="*80)
-            print("ORDERS PLACED:")
-            print("="*80)
+        for market in sorted_opportunities:
+            market_id = getattr(market, 'ticker', None) or getattr(market, 'market_id', 'N/A')
+            title = getattr(market, 'title', None) or getattr(market, 'question', 'N/A')
             
-            # Read the last few lines (recent orders)
-            with open(log_file, "r") as f:
-                lines = f.readlines()
-                # Get the last 20 lines (or all if less than 20)
-                recent_lines = lines[-20:] if len(lines) > 20 else lines
-                
-                if recent_lines:
-                    print(f"\nShowing last {len(recent_lines)} order(s):\n")
-                    for line in recent_lines:
-                        line = line.strip()
-                        if line:
-                            # Parse the log line: timestamp, market_id, side, price, order_id
-                            parts = line.split(", ")
-                            if len(parts) >= 4:
-                                timestamp = parts[0]
-                                market_id = parts[1]
-                                side = parts[2]
-                                price = parts[3]
-                                order_id = parts[4] if len(parts) > 4 else "N/A"
-                                print(f"  {side:4s} | Market: {market_id[:50]:50s} | Price: {price:6s} | Order ID: {order_id}")
-                            else:
-                                print(f"  {line}")
-                else:
-                    print("No orders found in log file.")
-            print("="*80)
-        else:
-            print(f"\nNo order log file found at: {log_file}")
-              
+            # Get spread
+            spread = mm.get_market_spread(market)
+            if spread == 0:
+                # Calculate from bid/ask
+                yes_bid = getattr(market, 'yes_bid', None)
+                yes_ask = getattr(market, 'yes_ask', None)
+                if yes_bid is not None and yes_ask is not None:
+                    if yes_bid > 1 or yes_ask > 1:
+                        spread = (yes_ask - yes_bid) / 100.0
+                    else:
+                        spread = yes_ask - yes_bid
+            
+            volume = getattr(market, 'volume', 0) or 0
+            yes_bid = getattr(market, 'yes_bid', None)
+            yes_ask = getattr(market, 'yes_ask', None)
+            
+            # Format prices
+            yes_bid_str = f"{yes_bid:.2f}¢" if yes_bid and yes_bid > 1 else f"{yes_bid*100:.2f}¢" if yes_bid else "N/A"
+            yes_ask_str = f"{yes_ask:.2f}¢" if yes_ask and yes_ask > 1 else f"{yes_ask*100:.2f}¢" if yes_ask else "N/A"
+            spread_str = f"{spread*100:.2f}¢" if spread else "N/A"
+            
+            # Truncate title if too long
+            title_display = title[:37] + "..." if len(title) > 40 else title
+            market_id_display = market_id[:47] + "..." if len(market_id) > 50 else market_id
+            
+            print(f"{market_id_display:<50} {title_display:<40} {spread_str:<10} {volume:<12,} {yes_bid_str:<10} {yes_ask_str:<10}")
+        
+        print(f"\n{'='*100}")
+    else:
+        print("No market opportunities found matching the criteria (Volume >= 1000, Spread >= 3 cents)")
+        print(f"{'='*100}")
