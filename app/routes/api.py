@@ -70,6 +70,8 @@ def get_fills():
 def get_markets():
     """Get markets for the target series."""
     series = request.args.get('series', app_config.strategy.target_series)
+    if isinstance(series, list):
+        series = series[0]
     markets = kalshi_service.get_markets(series_ticker=series, status='open')
     return jsonify({'markets': markets})
 
@@ -315,7 +317,6 @@ def get_config():
             'min_spread': app_config.strategy.min_spread,
             'default_spread': app_config.strategy.default_spread,
             'quote_refresh_interval': app_config.strategy.quote_refresh_interval,
-            'use_weather_fair_value': app_config.strategy.use_weather_fair_value,
         },
     })
 

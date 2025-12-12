@@ -242,6 +242,11 @@ class MarketMaker:
             ob_data = kalshi_service.get_orderbook(market.ticker)
             if not ob_data:
                 return
+            orderbook = Orderbook(ticker=market.ticker)
+            orderbook.apply_snapshot(
+                yes_levels=ob_data.get('yes', []),
+                no_levels=ob_data.get('no', []),
+            )
         
         # Check stop-loss using current mid price
         current_mid = orderbook.mid if orderbook and orderbook.mid else None
@@ -296,12 +301,12 @@ class MarketMaker:
         # Only place a new buy if position is 0 and no open buy order
         if can_bid and not market.bid_order_id and position == 0:
             result = kalshi_service.create_order(
-                ticker=market.ticker,
-                action='buy',
-                side='yes',
-                count=1,  # Always 1 contract
-                order_type='limit',
-                price=quote.bid_price,
+                market.ticker,
+                'buy',
+                'yes',
+                1,  # Always 1 contract
+                'limit',
+                quote.bid_price
             )
             if result.success:
                 market.bid_order_id = result.order_id
@@ -310,12 +315,12 @@ class MarketMaker:
         # Only place a new sell if position is 1 and no open sell order
         if can_ask and not market.ask_order_id and position == 1:
             result = kalshi_service.create_order(
-                ticker=market.ticker,
-                action='sell',
-                side='yes',
-                count=1,  # Always 1 contract
-                order_type='limit',
-                price=quote.ask_price,
+                market.ticker,
+                'sell',
+                'yes',
+                1,  # Always 1 contract
+                'limit',
+                quote.ask_price
             )
             if result.success:
                 market.ask_order_id = result.order_id
@@ -343,8 +348,8 @@ class MarketMaker:
         if not orderbook:
             return None
         
-        best_bid = orderbook.best_bid
-        best_ask = orderbook.best_ask
+        best_bid = orderbook.best_yes_bid
+        best_ask = orderbook.best_yes_ask
         
         # If no orderbook depth, use mid or default
         if best_bid is None and best_ask is None:
@@ -353,8 +358,14 @@ class MarketMaker:
             ask_price = 50 + half_spread
         elif best_bid is None:
             # Only asks in book - bid below the ask
-            ask_price = best_ask - 1  # Undercut
-            bid_price = ask_price - app_config.strategy.min_spread
+            if best_ask is not None:
+                ask_price = best_ask - 1  # Undercut
+                bid_price = ask_price - app_config.strategy.min_spread
+            else:
+                # No ask in book, fallback to default
+                half_spread = app_config.strategy.default_spread // 2
+                bid_price = 50 - half_spread
+                ask_price = 50 + half_spread
         elif best_ask is None:
             # Only bids in book - ask above the bid  
             bid_price = best_bid + 1  # Undercut
@@ -426,14 +437,14 @@ class MarketMaker:
         if position > 0:
             # We're long - need to sell
             # Place aggressive sell order at best bid (take the bid)
-            exit_price = orderbook.best_bid if orderbook.best_bid else 1
+            exit_price = orderbook.best_yes_bid if orderbook.best_yes_bid else 1
             result = kalshi_service.create_order(
-                ticker=market.ticker,
-                action='sell',
-                side='yes',
-                count=abs(position),
-                order_type='limit',
-                price=exit_price,
+                market.ticker,
+                'sell',
+                'yes',
+                abs(position),
+                'limit',
+                exit_price
             )
             if result.success:
                 logger.info(f"Force exit: SELL {abs(position)} {market.ticker} @ {exit_price}¢")
@@ -442,14 +453,14 @@ class MarketMaker:
         else:
             # We're short (long NO) - need to buy back
             # Place aggressive buy order at best ask (take the ask)
-            exit_price = orderbook.best_ask if orderbook.best_ask else 99
+            exit_price = orderbook.best_yes_ask if orderbook.best_yes_ask else 99
             result = kalshi_service.create_order(
-                ticker=market.ticker,
-                action='buy',
-                side='yes',
-                count=abs(position),
-                order_type='limit',
-                price=exit_price,
+                market.ticker,
+                'buy',
+                'yes',
+                abs(position),
+                'limit',
+                exit_price
             )
             if result.success:
                 logger.info(f"Force exit: BUY {abs(position)} {market.ticker} @ {exit_price}¢")

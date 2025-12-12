@@ -4,6 +4,7 @@ Kalshi API Client Service
 Wrapper around the Kalshi Python SDK providing unified access to all API functionality.
 Handles authentication, order management, positions, and market data.
 """
+import inspect
 import uuid
 import logging
 from typing import Optional, List, Dict, Any
@@ -272,15 +273,40 @@ class KalshiService:
                 'client_order_id': client_order_id,
             }
             
-            # Add price based on side
+            # Add both yes_price and no_price for limit orders (required by Kalshi API)
             if order_type == 'limit':
-                if side == 'yes':
-                    order_params['yes_price'] = price
-                else:
-                    order_params['no_price'] = price
+                order_params['yes_price'] = price if side == 'yes' else None
+                order_params['no_price'] = price if side == 'no' else None
+
+            order_params = {k: v for k, v in order_params.items() if v is not None}
             
             request = CreateOrderRequest(**order_params)
-            response = self._portfolio_api.create_order(create_order_request=request)
+
+            create_order_fn = self._portfolio_api.create_order
+            sig = inspect.signature(create_order_fn)
+            param_names = set(sig.parameters.keys())
+            last_err: Optional[Exception] = None
+            for attempt in (
+                ('create_order_request',),
+                ('body',),
+                ('positional',),
+                ('kwargs',),
+            ):
+                try:
+                    if attempt[0] == 'create_order_request' and 'create_order_request' in param_names:
+                        response = create_order_fn(create_order_request=request)
+                    elif attempt[0] == 'body' and 'body' in param_names:
+                        response = create_order_fn(body=request)
+                    elif attempt[0] == 'positional':
+                        response = create_order_fn(request)
+                    else:
+                        response = create_order_fn(**order_params)
+                    break
+                except Exception as e:
+                    last_err = e
+                    response = None
+            else:
+                raise last_err if last_err else RuntimeError("Failed to create order")
             
             if response.order is None:
                 return OrderResult(success=False, error="Order response missing order data", client_order_id=client_order_id)
