@@ -14,7 +14,6 @@ from config import config as app_config
 
 api_bp = Blueprint('api', __name__)
 
-
 # =============================================================================
 # Account Endpoints
 # =============================================================================
@@ -175,24 +174,41 @@ def get_strategy_markets():
     markets = market_maker.get_market_states()
     result = []
     
+    # Ensure all markets are subscribed to WebSocket
+    tickers = list(markets.keys())
+    if tickers:
+        current_subscriptions = orderbook_service.subscribed_tickers
+        new_tickers = [t for t in tickers if t not in current_subscriptions]
+        if new_tickers:
+            orderbook_service.subscribe(new_tickers)
+    
     for m in markets.values():
-        # Get orderbook data (from WebSocket cache or REST fallback)
+        # ALWAYS use orderbook data first
         orderbook = orderbook_service.get_orderbook(m.ticker)
+        
         best_bid = None
         best_ask = None
+        spread = None
+        mid = None
+        last_update = None
         
         if orderbook:
             best_bid = orderbook.best_yes_bid
             best_ask = orderbook.best_yes_ask
-        
-        # If no WS data, try REST API
-        if best_bid is None and best_ask is None:
+            spread = orderbook.spread
+            mid = orderbook.mid
+            last_update = orderbook.last_update
+        else:
+            # Fallback to REST API
             try:
                 metrics = kalshi_service.get_market_metrics(m.ticker)
                 if metrics:
                     best_bid = metrics.get('bid')
                     best_ask = metrics.get('ask')
-            except Exception:
+                    if best_bid and best_ask:
+                        spread = best_ask - best_bid
+                        mid = (best_bid + best_ask) / 2
+            except Exception as e:
                 pass
         
         result.append({
@@ -200,11 +216,14 @@ def get_strategy_markets():
             'title': m.title,
             'is_active': m.is_active,
             'quote': {
-                'bid': m.current_quote.bid_price if m.current_quote else best_bid,
-                'ask': m.current_quote.ask_price if m.current_quote else best_ask,
+                'bid': best_bid,
+                'ask': best_ask,
+                'spread': spread,
+                'mid': mid,
             },
             'fills_count': m.fills_count,
             'last_quote_time': m.last_quote_time.isoformat() if m.last_quote_time else None,
+            'last_update': last_update,  
         })
     
     return jsonify({'markets': result})

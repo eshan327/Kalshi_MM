@@ -179,7 +179,7 @@ class OrderbookService:
     Runs in a background thread with its own asyncio event loop.
     Provides thread-safe access to orderbook state.
     """
-    
+
     def __init__(self):
         self._orderbooks: Dict[str, Orderbook] = {}
         self._lock = Lock()
@@ -287,6 +287,30 @@ class OrderbookService:
                 else:
                     await self._handle_message(bytes(message).decode('utf-8'))
     
+
+    async def _handle_delta(self, data: Dict):
+        """Handle orderbook delta message."""
+        msg = data.get('msg', {})
+        
+        ticker = msg.get('market_ticker')
+        price = msg.get('price')
+        delta = msg.get('delta')
+        side = msg.get('side')
+        
+        if not all([ticker, price is not None, delta is not None, side]):
+            return
+        
+        with self._lock:
+            if ticker not in self._orderbooks:
+                self._orderbooks[ticker] = Orderbook(ticker=ticker)
+            
+            ob = self._orderbooks[ticker]
+            ob.apply_delta(side, price, delta)
+            ob.last_update = time.time()
+        
+        self._notify_callbacks(ticker)
+
+
     async def _handle_message(self, message: str):
         """Handle incoming WebSocket message."""
         try:
@@ -304,7 +328,7 @@ class OrderbookService:
             
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse message: {e}")
-    
+
     async def _handle_snapshot(self, data: Dict):
         """Handle orderbook snapshot message."""
         msg = data.get('msg', {})
@@ -324,27 +348,6 @@ class OrderbookService:
             )
         
         logger.debug(f"Snapshot received for {ticker}")
-        self._notify_callbacks(ticker)
-    
-    async def _handle_delta(self, data: Dict):
-        """Handle orderbook delta message."""
-        msg = data.get('msg', {})
-        ticker = msg.get('market_ticker')
-        
-        if not ticker:
-            return
-        
-        with self._lock:
-            if ticker not in self._orderbooks:
-                self._orderbooks[ticker] = Orderbook(ticker=ticker)
-            
-            ob = self._orderbooks[ticker]
-            
-            # Process deltas
-            for side in ['yes', 'no']:
-                for price, delta in msg.get(side, []):
-                    ob.apply_delta(side, price, delta)
-        
         self._notify_callbacks(ticker)
     
     async def _send_subscription(self, tickers: List[str]):
