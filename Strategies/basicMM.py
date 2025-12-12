@@ -529,6 +529,7 @@ class BasicMM:
             
             
             buy_price_cents, sell_price_cents = self.get_price(market_id)
+            sell_price_cents = 100 - sell_price_cents
             
             # Check if get_price returned None values (error case)
             if buy_price_cents is None or sell_price_cents is None:
@@ -548,6 +549,8 @@ class BasicMM:
             # Calculate how many contracts we can afford with the available bankroll
             # Cost per contract pair = buy_price + sell_price (need both for market making)
             cost_per_contract_pair = buy_price_cents + sell_price_cents
+            print(f"Buy price: {buy_price_cents}, Sell price: {sell_price_cents}")
+            print(f"Cost per contract pair: {cost_per_contract_pair}")
             
             if cost_per_contract_pair <= 0:
                 print(f"Error: Invalid prices for market {market_id} (buy: {buy_price_cents}¢, sell: {sell_price_cents}¢). Skipping.")
@@ -628,7 +631,7 @@ class BasicMM:
                         action="sell",
                         count=contracts_per_order,
                         type="limit",
-                        yes_price=sell_price_cents  # API expects cents (1-99), not probability
+                        yes_price=100-sell_price_cents  # API expects cents (1-99), not probability
                     )
                     # Subtract from bankroll if order was successfully created
                     # Total cost = price per contract * number of contracts
