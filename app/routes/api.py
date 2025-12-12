@@ -10,7 +10,6 @@ from services.kalshi_client import kalshi_service
 from services.risk_manager import risk_manager
 from services.market_maker import market_maker, StrategyState
 from services.orderbook import orderbook_service
-from services.fair_value import fair_value_calculator
 from config import config as app_config
 
 api_bp = Blueprint('api', __name__)
@@ -103,23 +102,6 @@ def get_orderbook(ticker: str):
     })
 
 
-@api_bp.route('/markets/<ticker>/fair-value')
-def get_fair_value(ticker: str):
-    """Get fair value for a market."""
-    fv = fair_value_calculator.calculate_fair_value(ticker)
-    if fv:
-        return jsonify({
-            'ticker': fv.ticker,
-            'fair_value': fv.fair_value,
-            'confidence': fv.confidence,
-            'forecast_temp': fv.forecast_temp,
-            'threshold_temp': fv.threshold_temp,
-            'market_type': fv.market_type,
-            'reasoning': fv.reasoning,
-        })
-    return jsonify({'error': 'Could not calculate fair value'}), 404
-
-
 # =============================================================================
 # Strategy Control Endpoints
 # =============================================================================
@@ -189,28 +171,41 @@ def resume_strategy():
 def get_strategy_markets():
     """Get current market states from the strategy."""
     markets = market_maker.get_market_states()
-    return jsonify({
-        'markets': [
-            {
-                'ticker': m.ticker,
-                'title': m.title,
-                'is_active': m.is_active,
-                'quote': {
-                    'bid': m.current_quote.bid_price if m.current_quote else None,
-                    'ask': m.current_quote.ask_price if m.current_quote else None,
-                    'fair_value': m.current_quote.fair_value if m.current_quote else None,
-                } if m.current_quote else None,
-                'fair_value': {
-                    'value': m.fair_value.fair_value if m.fair_value else None,
-                    'confidence': m.fair_value.confidence if m.fair_value else None,
-                    'forecast_temp': m.fair_value.forecast_temp if m.fair_value else None,
-                } if m.fair_value else None,
-                'fills_count': m.fills_count,
-                'last_quote_time': m.last_quote_time.isoformat() if m.last_quote_time else None,
-            }
-            for m in markets.values()
-        ]
-    })
+    result = []
+    
+    for m in markets.values():
+        # Get orderbook data (from WebSocket cache or REST fallback)
+        orderbook = orderbook_service.get_orderbook(m.ticker)
+        best_bid = None
+        best_ask = None
+        
+        if orderbook:
+            best_bid = orderbook.best_yes_bid
+            best_ask = orderbook.best_yes_ask
+        
+        # If no WS data, try REST API
+        if best_bid is None and best_ask is None:
+            try:
+                metrics = kalshi_service.get_market_metrics(m.ticker)
+                if metrics:
+                    best_bid = metrics.get('bid')
+                    best_ask = metrics.get('ask')
+            except Exception:
+                pass
+        
+        result.append({
+            'ticker': m.ticker,
+            'title': m.title,
+            'is_active': m.is_active,
+            'quote': {
+                'bid': m.current_quote.bid_price if m.current_quote else best_bid,
+                'ask': m.current_quote.ask_price if m.current_quote else best_ask,
+            },
+            'fills_count': m.fills_count,
+            'last_quote_time': m.last_quote_time.isoformat() if m.last_quote_time else None,
+        })
+    
+    return jsonify({'markets': result})
 
 
 @api_bp.route('/strategy/markets/<ticker>/toggle', methods=['POST'])

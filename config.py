@@ -108,10 +108,6 @@ class StrategyConfig:
     # Quote behavior
     quote_refresh_interval: float = field(default_factory=lambda: _get_env_float("QUOTE_REFRESH_INTERVAL", 5.0))
     requote_on_fill: bool = field(default_factory=lambda: _get_env_bool("REQUOTE_ON_FILL", True))
-    
-    # Fair value
-    use_weather_fair_value: bool = field(default_factory=lambda: _get_env_bool("USE_WEATHER_FAIR_VALUE", True))
-    fair_value_confidence_threshold: float = field(default_factory=lambda: _get_env_float("FAIR_VALUE_CONFIDENCE_THRESHOLD", 0.7))
 
 
 @dataclass

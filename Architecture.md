@@ -2,6 +2,13 @@
 
 This document explains the architecture of the Kalshi Market Maker application.
 
+## Design Philosophy
+
+This market maker follows a **spread-capture strategy**:
+- We don't predict prices or calculate "fair value"
+- We profit from the bid-ask spread by quoting both sides
+- Risk is managed through position limits and inventory skew
+
 ## Directory Structure
 
 ```
@@ -9,6 +16,7 @@ Kalshi_MM/
 ├── run.py                 # Web server entry point
 ├── cli.py                 # CLI test script entry point
 ├── config.py              # Centralized configuration
+├── .env                   # API credentials (not in git)
 ├── requirements.txt       # Python dependencies
 │
 ├── app/                   # Flask web application layer
@@ -23,7 +31,6 @@ Kalshi_MM/
 │   ├── kalshi_client.py   # Kalshi SDK wrapper
 │   ├── orderbook.py       # Real-time orderbook (WebSocket)
 │   ├── risk_manager.py    # Risk management engine
-│   ├── fair_value.py      # Weather-based pricing model
 │   └── market_maker.py    # Trading strategy engine
 │
 ├── private_key.pem        # Production API key (not in git)
@@ -52,27 +59,27 @@ The application follows a **3-layer architecture**:
 │                                                 ▼          │
 │   ┌──────────────────────────────────────────────────────┐ │
 │   │                   market_maker.py                     │ │
-│   │            (Strategy / Quote Generation)              │ │
-│   └───────────┬────────────────┬────────────────┬────────┘ │
-│               │                │                │          │
-│               ▼                ▼                ▼          │
-│   ┌───────────────┐  ┌─────────────────┐  ┌────────────┐  │
-│   │ risk_manager  │  │   fair_value    │  │  orderbook │  │
-│   │    .py        │  │      .py        │  │    .py     │  │
-│   │ (Risk Limits) │  │ (Weather Model) │  │ (WebSocket)│  │
-│   └───────┬───────┘  └────────┬────────┘  └─────┬──────┘  │
-│           │                   │                 │          │
-└───────────┼───────────────────┼─────────────────┼──────────┘
-            │                   │                 │
-┌───────────┼───────────────────┼─────────────────┼──────────┐
-│           │      DATA ACCESS LAYER              │          │
-│           ▼                   ▼                 ▼          │
-│   ┌────────────────────────────────────────────────────┐   │
-│   │              kalshi_client.py                       │   │
-│   │         (SDK Wrapper / Authentication)              │   │
-│   └────────────────────────┬───────────────────────────┘   │
-│                            │                               │
-└────────────────────────────┼───────────────────────────────┘
+│   │         (Strategy / Spread-Based Quoting)             │ │
+│   └───────────┬────────────────────────────────┬─────────┘ │
+│               │                                │           │
+│               ▼                                ▼           │
+│   ┌───────────────┐                    ┌────────────┐     │
+│   │ risk_manager  │                    │  orderbook │     │
+│   │    .py        │                    │    .py     │     │
+│   │ (Risk Limits) │                    │ (WebSocket)│     │
+│   └───────┬───────┘                    └─────┬──────┘     │
+│           │                                  │            │
+└───────────┼──────────────────────────────────┼────────────┘
+            │                                  │
+┌───────────┼──────────────────────────────────┼────────────┐
+│           │      DATA ACCESS LAYER           │            │
+│           ▼                                  ▼            │
+│   ┌────────────────────────────────────────────────────┐  │
+│   │              kalshi_client.py                       │  │
+│   │         (SDK Wrapper / Authentication)              │  │
+│   └────────────────────────┬───────────────────────────┘  │
+│                            │                              │
+└────────────────────────────┼──────────────────────────────┘
                              │
                              ▼
                    ┌───────────────────┐
@@ -101,10 +108,11 @@ The application follows a **3-layer architecture**:
 | `app/routes/api.py` | JSON API endpoints at `GET /api/*` for the frontend |
 | `app/templates/dashboard.html` | Single-page dashboard with real-time updates via JavaScript polling |
 
-**Request Flow:**
-```
-Browser → GET /api/account/balance → api.py → kalshi_service.get_balance() → JSON response
-```
+**Dashboard displays:**
+- Market ticker, bid, ask, mid, spread
+- Position and P&L tracking
+- Strategy controls (start/stop/kill switch)
+- Live uptime counter
 
 ### Business Logic Layer (`services/`)
 
@@ -112,10 +120,27 @@ This layer contains all trading logic, independent of Flask.
 
 | Service | Responsibility |
 |---------|----------------|
-| `market_maker.py` | **Core strategy engine**: Finds opportunities, generates quotes, manages order lifecycle |
+| `market_maker.py` | **Core strategy engine**: Finds spread opportunities, places orders, manages order lifecycle |
 | `risk_manager.py` | **Risk enforcement**: Position limits, daily loss limits, inventory skew calculations |
-| `fair_value.py` | **Pricing model**: Fetches NWS weather data, calculates theoretical probabilities |
 | `orderbook.py` | **Real-time data**: Maintains live orderbook state via WebSocket streaming |
+
+**Strategy Logic (Undercut the Spread):**
+
+On Kalshi, you place limit orders to buy/sell contracts:
+
+1. **Find opportunity**: Look for markets with spread ≥ 5¢
+2. **Buy side**: Place limit bid at `best_bid` or `best_bid + 1¢` to undercut other buyers
+3. **Wait for fill**: When bid fills, we acquire contracts
+4. **Sell side**: Offer contracts at `best_ask` or `best_ask - 1¢` to undercut other sellers
+5. **Profit**: The difference between buy and sell price
+
+**Example:**
+```
+Market: Bid 42¢ / Ask 48¢ (6¢ spread)
+→ We bid at 43¢, get filled (undercut buyers)
+→ We offer at 47¢, get filled (undercut sellers)  
+→ Profit: 4¢ per contract
+```
 
 **Service Singletons:**
 Each service exports a singleton instance for shared state:
@@ -138,12 +163,11 @@ Wraps the `kalshi-python` SDK, providing:
 | Class | Purpose |
 |-------|---------|
 | `PortfolioApi` | Balance, orders, positions, fills |
-| `MarketsApi` | Market data, orderbook, trades |
-| `SeriesApi` | Series metadata |
+| `MarketsApi` | Market data, orderbook |
 
 ### Configuration (`config.py`)
 
-Centralized settings using Python dataclasses:
+Environment-based configuration using Python dataclasses:
 
 ```python
 @dataclass
@@ -156,6 +180,12 @@ class AppConfig:
 config = AppConfig()  # Global singleton
 ```
 
+**Key Strategy Settings:**
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `min_spread` | 5¢ | Minimum spread to trade |
+| `quote_refresh_interval` | 5s | How often to refresh quotes |
+
 ## Data Flow Examples
 
 ### 1. Dashboard Refresh (Every 2 seconds)
@@ -164,7 +194,7 @@ dashboard.html (JavaScript)
     │
     ├─► GET /api/account/balance ─► kalshi_service.get_balance() ─► SDK ─► Kalshi API
     ├─► GET /api/account/positions ─► kalshi_service.get_positions() ─► SDK ─► Kalshi API
-    ├─► GET /api/strategy/status ─► market_maker.get_status()
+    ├─► GET /api/strategy/markets ─► market_maker + orderbook data
     └─► GET /api/risk/status ─► risk_manager.get_status()
 ```
 
@@ -179,7 +209,8 @@ POST /api/strategy/start
 market_maker.start()
     │
     ├─► Fetch markets from kalshi_service
-    ├─► Calculate fair values from fair_value service
+    ├─► Subscribe to orderbook WebSocket
+    ├─► Check spreads ≥ min_spread
     ├─► Check risk limits from risk_manager
     └─► Place quotes via kalshi_service.create_order()
 ```
@@ -203,15 +234,17 @@ market_maker reads orderbook_service.get_orderbook(ticker)
 
 ## Key Design Decisions
 
-1. **Singleton Services**: Services maintain state (positions, orderbook) and are shared across the app.
+1. **No Fair Value Model**: We capture spreads, not predict prices. Simpler and more robust.
 
-2. **SDK-Only API Access**: All Kalshi API calls go through the official SDK, no raw REST calls (except NWS weather API).
+2. **Singleton Services**: Services maintain state (positions, orderbook) and are shared across the app.
 
-3. **Separation of Concerns**: Flask knows nothing about trading logic; services know nothing about HTTP.
+3. **SDK-Only API Access**: All Kalshi API calls go through the official SDK.
 
-4. **Configuration as Code**: All settings in `config.py`, not scattered across files.
+4. **Separation of Concerns**: Flask knows nothing about trading logic; services know nothing about HTTP.
 
-5. **WebSocket for Orderbook**: Real-time streaming is faster than polling for market data.
+5. **Environment-Based Config**: All settings via environment variables for security and flexibility.
+
+6. **WebSocket for Orderbook**: Real-time streaming is faster than polling for market data.
 
 ## External Dependencies
 
@@ -220,5 +253,6 @@ market_maker reads orderbook_service.get_orderbook(ticker)
 | `kalshi-python` | Official Kalshi SDK |
 | `flask` | Web framework |
 | `flask-socketio` | WebSocket support for Flask |
-| `requests` | HTTP client (for NWS weather API only) |
-| `scipy` | Statistical functions for fair value calculations |
+| `websockets` | Kalshi orderbook WebSocket |
+| `cryptography` | RSA key authentication |
+| `python-dotenv` | Environment variable loading |

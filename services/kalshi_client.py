@@ -207,11 +207,11 @@ class KalshiService:
         
         # Best YES bid (highest price someone will pay for YES)
         if yes_bids:
-            metrics['bid'] = yes_bids[-1][0]
+            metrics['bid'] = max(lvl[0] for lvl in yes_bids)
         
-        # Best YES ask (derived from best NO bid)
+        # Best YES ask (derived from best NO bid: ask = 100 - best_no_bid)
         if no_bids:
-            best_no_bid = no_bids[-1][0]
+            best_no_bid = max(lvl[0] for lvl in no_bids)
             metrics['ask'] = 100 - best_no_bid
         
         # Spread and mid

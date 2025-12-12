@@ -122,9 +122,9 @@
                             <tr class="text-left text-gray-400 border-b border-gray-700">
                                 <th class="pb-3 pr-4">Market</th>
                                 <th class="pb-3 px-4 text-center">Position</th>
-                                <th class="pb-3 px-4 text-center">Fair Value</th>
                                 <th class="pb-3 px-4 text-center">Bid</th>
                                 <th class="pb-3 px-4 text-center">Ask</th>
+                                <th class="pb-3 px-4 text-center">Mid</th>
                                 <th class="pb-3 px-4 text-center">Spread</th>
                                 <th class="pb-3 px-4 text-center">Fills</th>
                                 <th class="pb-3 pl-4 text-center">Active</th>
@@ -243,6 +243,7 @@
     <script>
         // State
         let refreshInterval = null;
+        let strategyStartTime = null;
         
         // API calls
         async function api(endpoint, method = 'GET', body = null) {
@@ -331,12 +332,12 @@
             document.getElementById('stat-fills').textContent = data.stats.total_fills;
             document.getElementById('stat-volume').textContent = data.stats.total_volume;
             
-            const uptime = data.stats.uptime_seconds || 0;
-            const hours = Math.floor(uptime / 3600);
-            const mins = Math.floor((uptime % 3600) / 60);
-            const secs = Math.floor(uptime % 60);
-            document.getElementById('stat-uptime').textContent = 
-                `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            // Track strategy start time for live uptime
+            if (data.stats.start_time && state === 'running') {
+                strategyStartTime = new Date(data.stats.start_time);
+            } else if (state === 'stopped') {
+                strategyStartTime = null;
+            }
             
             // Update P&L
             const pnl = data.risk.daily_pnl || 0;
@@ -380,10 +381,12 @@
             tbody.innerHTML = data.markets.map(m => {
                 const pos = posLookup[m.ticker] || 0;
                 const posClass = pos > 0 ? 'text-green-400' : pos < 0 ? 'text-red-400' : 'text-gray-400';
-                const fv = m.fair_value?.value || '-';
-                const bid = m.quote?.bid || '-';
-                const ask = m.quote?.ask || '-';
-                const spread = (bid !== '-' && ask !== '-') ? (ask - bid) : '-';
+                const bid = m.quote?.bid;
+                const ask = m.quote?.ask;
+                const mid = (bid != null && ask != null) ? ((bid + ask) / 2).toFixed(1) : '-';
+                const spread = (bid != null && ask != null) ? (ask - bid) : '-';
+                const bidDisplay = bid != null ? bid : '-';
+                const askDisplay = ask != null ? ask : '-';
                 
                 return `
                     <tr class="border-b border-gray-700 hover:bg-gray-750">
@@ -392,9 +395,9 @@
                             <div class="text-xs text-gray-500 truncate max-w-xs">${m.title}</div>
                         </td>
                         <td class="py-3 px-4 text-center font-mono ${posClass}">${pos}</td>
-                        <td class="py-3 px-4 text-center font-mono">${fv}¢</td>
-                        <td class="py-3 px-4 text-center font-mono text-green-400">${bid}¢</td>
-                        <td class="py-3 px-4 text-center font-mono text-red-400">${ask}¢</td>
+                        <td class="py-3 px-4 text-center font-mono text-green-400">${bidDisplay}¢</td>
+                        <td class="py-3 px-4 text-center font-mono text-red-400">${askDisplay}¢</td>
+                        <td class="py-3 px-4 text-center font-mono text-yellow-400">${mid}¢</td>
                         <td class="py-3 px-4 text-center font-mono">${spread}¢</td>
                         <td class="py-3 px-4 text-center font-mono">${m.fills_count}</td>
                         <td class="py-3 pl-4 text-center">
@@ -479,6 +482,21 @@
             console.log('Cancel order:', orderId);
         }
         
+        // Update uptime display
+        function updateUptime() {
+            if (strategyStartTime) {
+                const now = new Date();
+                const uptime = Math.floor((now - strategyStartTime) / 1000);
+                const hours = Math.floor(uptime / 3600);
+                const mins = Math.floor((uptime % 3600) / 60);
+                const secs = uptime % 60;
+                document.getElementById('stat-uptime').textContent = 
+                    `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            } else {
+                document.getElementById('stat-uptime').textContent = '00:00:00';
+            }
+        }
+        
         // Refresh all data
         async function refreshAll() {
             await Promise.all([
@@ -494,8 +512,10 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             refreshAll();
-            // Auto-refresh every 2 seconds
+            // Auto-refresh data every 2 seconds
             refreshInterval = setInterval(refreshAll, 2000);
+            // Update uptime every second
+            setInterval(updateUptime, 1000);
         });
     </script>
 </body>
