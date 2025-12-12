@@ -68,21 +68,21 @@ class BasicMM:
                     response = self.client.get_markets(**params)
                     consecutive_errors = 0  # Reset error counter on success
 
-                if hasattr(response, 'markets') and response.markets:
-                    all_markets.extend(response.markets)
-                    page_count += 1
+                    if hasattr(response, 'markets') and response.markets:
+                        all_markets.extend(response.markets)
+                        page_count += 1
                         # Print progress every 10 pages
-                    if page_count % 10 == 0:
+                        if page_count % 10 == 0:
                             print(f"Fetched {len(all_markets)} markets so far (page {page_count}, {skipped_markets} markets skipped due to errors)...")
                     
                         # Get cursor for next page
-                if hasattr(response, 'cursor') and response.cursor:
-                    cursor = response.cursor
+                        if hasattr(response, 'cursor') and response.cursor:
+                            cursor = response.cursor
                             self.last_cursor = cursor
-                else:
+                        else:
                             self.last_cursor = None
                             break
-                else:
+                    else:
                         # No more markets
                         self.last_cursor = None
                         break
@@ -158,10 +158,10 @@ class BasicMM:
                                 
                                 # Continue to next iteration with updated cursor
                                 continue
-                else:
+                            else:
                                 # No more markets
                                 self.last_cursor = None
-                    break
+                                break
 
                         except Exception as http_error:
                             print(f"Raw HTTP request also failed: {http_error}")
@@ -695,14 +695,14 @@ class BasicMM:
 
                 # Cancel any partial orders if one failed
                 try:
-                if buy_order:
+                    if buy_order:
                             order_id = (getattr(buy_order, 'order_id', None) or 
                                     getattr(buy_order, 'id', None) or 
                                     getattr(buy_order, 'orderId', None))
                             if order_id:
                                 self.client.cancel_order(order_id)
                                 print(f"  Cancelled buy order {order_id}")
-                if sell_order:
+                    if sell_order:
                             order_id = (getattr(sell_order, 'order_id', None) or 
                                     getattr(sell_order, 'id', None) or 
                                     getattr(sell_order, 'orderId', None))
