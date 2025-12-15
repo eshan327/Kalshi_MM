@@ -46,7 +46,7 @@
         <div class="flex items-center space-x-4">
           <h1 class="text-2xl font-bold text-blue-400">Kalshi MM</h1>
           <span class="text-gray-400">|</span>
-          <span id="series-name" class="text-gray-300">KXHIGHNY</span>
+          <span id="series-name" class="text-gray-300">KXHIGHDEN</span>
         </div>
         <div class="flex items-center space-x-6">
           <!-- Connection Status -->
@@ -305,12 +305,71 @@
           </div>
         </div>
       </div>
+
+      <div class="bg-gray-800 rounded-lg p-6 mt-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold">Simulation (Paper Trading)</h2>
+          <div class="flex space-x-3">
+            <button
+              onclick="startSim()"
+              class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-medium transition"
+            >
+              Start Sim
+            </button>
+            <button
+              onclick="stopSim()"
+              class="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg font-medium transition"
+            >
+              Stop Sim
+            </button>
+            <button
+              onclick="resetSim()"
+              class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-medium transition"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-6 gap-4 text-center mb-6">
+          <div class="bg-gray-700 rounded-lg p-4">
+            <div class="text-sm text-gray-400">Sim Market</div>
+            <div id="sim-ticker" class="text-sm font-mono">-</div>
+          </div>
+          <div class="bg-gray-700 rounded-lg p-4">
+            <div class="text-sm text-gray-400">Equity</div>
+            <div id="sim-equity" class="text-lg font-mono text-yellow-400">0.0¢</div>
+          </div>
+          <div class="bg-gray-700 rounded-lg p-4">
+            <div class="text-sm text-gray-400">Realized</div>
+            <div id="sim-realized" class="text-lg font-mono text-green-400">0.0¢</div>
+          </div>
+          <div class="bg-gray-700 rounded-lg p-4">
+            <div class="text-sm text-gray-400">Inventory</div>
+            <div id="sim-inv" class="text-lg font-mono">0</div>
+          </div>
+          <div class="bg-gray-700 rounded-lg p-4">
+            <div class="text-sm text-gray-400">Win Rate</div>
+            <div id="sim-winrate" class="text-lg font-mono">-</div>
+          </div>
+          <div class="bg-gray-700 rounded-lg p-4">
+            <div class="text-sm text-gray-400">Volume</div>
+            <div id="sim-volume" class="text-lg font-mono">0</div>
+          </div>
+        </div>
+
+        <div class="bg-gray-700 rounded-lg p-4">
+          <div class="text-sm text-gray-300 mb-2">PnL (¢)</div>
+          <canvas id="sim-pnl-chart" height="90"></canvas>
+        </div>
+      </div>
     </main>
 
     <script>
       // State
       let refreshInterval = null;
       let strategyStartTime = null;
+      let simPnlChart = null;
 
       // API calls
       async function api(endpoint, method = "GET", body = null) {
@@ -643,6 +702,87 @@
         console.log("Cancel order:", orderId);
       }
 
+      async function startSim() {
+        await api("/sim/start", "POST", { duration_seconds: 1800, order_size: 10 });
+        refreshSim();
+      }
+
+      async function stopSim() {
+        await api("/sim/stop", "POST");
+        refreshSim();
+      }
+
+      async function resetSim() {
+        await api("/sim/reset", "POST");
+        refreshSim();
+      }
+
+      function initSimChart() {
+        const ctx = document.getElementById("sim-pnl-chart");
+        if (!ctx) return;
+
+        simPnlChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: "Equity (¢)",
+                data: [],
+                borderColor: "#f59e0b",
+                backgroundColor: "rgba(245, 158, 11, 0.15)",
+                tension: 0.2,
+              },
+              {
+                label: "Realized (¢)",
+                data: [],
+                borderColor: "#10b981",
+                backgroundColor: "rgba(16, 185, 129, 0.10)",
+                tension: 0.2,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: "#d1d5db" } },
+            },
+            scales: {
+              x: { ticks: { color: "#9ca3af" } },
+              y: { ticks: { color: "#9ca3af" } },
+            },
+          },
+        });
+      }
+
+      async function refreshSim() {
+        const status = await api("/sim/status");
+        document.getElementById("sim-ticker").textContent = status.ticker || "-";
+        document.getElementById("sim-equity").textContent =
+          status.equity_cents != null ? `${status.equity_cents.toFixed(1)}¢` : "-";
+        document.getElementById("sim-realized").textContent =
+          status.realized_pnl_cents != null
+            ? `${status.realized_pnl_cents.toFixed(1)}¢`
+            : "-";
+        document.getElementById("sim-inv").textContent = status.inventory ?? 0;
+        document.getElementById("sim-volume").textContent = status.volume ?? 0;
+        document.getElementById("sim-winrate").textContent =
+          status.win_rate != null ? `${(status.win_rate * 100).toFixed(1)}%` : "-";
+
+        const ts = await api("/sim/timeseries?limit=300");
+        const pts = ts.timeseries || [];
+        if (simPnlChart && pts.length > 0) {
+          simPnlChart.data.labels = pts.map((p) => {
+            const d = new Date(p.ts * 1000);
+            return d.toLocaleTimeString();
+          });
+          simPnlChart.data.datasets[0].data = pts.map((p) => p.equity_cents);
+          simPnlChart.data.datasets[1].data = pts.map((p) => p.realized_pnl_cents);
+          simPnlChart.update("none");
+        }
+      }
+
       // Update uptime display
       function updateUptime() {
         if (strategyStartTime) {
@@ -670,11 +810,13 @@
           refreshOrders(),
           refreshFills(),
           refreshRisk(),
+          refreshSim(),
         ]);
       }
 
       // Initialize
       document.addEventListener("DOMContentLoaded", () => {
+        initSimChart();
         refreshAll();
         // Auto-refresh data every 2 seconds
         refreshInterval = setInterval(refreshAll, 2000);

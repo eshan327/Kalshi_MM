@@ -24,6 +24,7 @@ def initialize_services():
     from config import config as app_config
     from services.kalshi_client import kalshi_service
     from services.orderbook import orderbook_service
+    from services.public_trades import public_trades_service
     from services.risk_manager import risk_manager
     
     # Initialize Kalshi client
@@ -42,6 +43,7 @@ def initialize_services():
         return False
     
     orderbook_service.initialize(private_key)
+    public_trades_service.initialize(private_key)
     
     # Initialize risk manager
     risk_manager.initialize()
@@ -66,6 +68,9 @@ def main():
     # Start orderbook WebSocket service
     from services.orderbook import orderbook_service
     orderbook_service.start()
+
+    from services.public_trades import public_trades_service
+    public_trades_service.start()
     
     # Create and run Flask app
     from app import create_app, socketio
@@ -87,8 +92,10 @@ def main():
     finally:
         # Cleanup
         from services.market_maker import market_maker
+        from services.public_trades import public_trades_service
         market_maker.stop()
         orderbook_service.stop()
+        public_trades_service.stop()
         logger.info("Shutdown complete")
 
 

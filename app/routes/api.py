@@ -10,6 +10,7 @@ from services.kalshi_client import kalshi_service
 from services.risk_manager import risk_manager
 from services.market_maker import market_maker, StrategyState
 from services.orderbook import orderbook_service
+from services.paper_trader import paper_trader
 from config import config as app_config
 
 api_bp = Blueprint('api', __name__)
@@ -236,6 +237,63 @@ def toggle_market(ticker: str):
     active = data.get('active', True)
     market_maker.set_market_active(ticker, active)
     return jsonify({'ticker': ticker, 'active': active})
+
+@api_bp.route('/sim/status')
+def get_sim_status():
+    return jsonify(paper_trader.get_status())
+
+
+@api_bp.route('/sim/start', methods=['POST'])
+def start_sim():
+    data = request.get_json() or {}
+    duration_seconds = int(data.get('duration_seconds', 1800))
+    order_size = int(data.get('order_size', 10))
+    min_spread = data.get('min_spread', None)
+    min_profit = int(data.get('min_profit', 1))
+    ticker = data.get('ticker', None)
+    paper_trader.start(
+        duration_seconds=duration_seconds,
+        order_size=order_size,
+        min_spread=int(min_spread) if min_spread is not None else None,
+        min_profit=min_profit,
+        ticker=str(ticker) if ticker else None,
+    )
+    return jsonify({'status': 'started'})
+
+
+@api_bp.route('/sim/stop', methods=['POST'])
+def stop_sim():
+    paper_trader.stop()
+    return jsonify({'status': 'stopped'})
+
+
+@api_bp.route('/sim/reset', methods=['POST'])
+def reset_sim():
+    paper_trader.reset()
+    return jsonify({'status': 'reset'})
+
+
+@api_bp.route('/sim/timeseries')
+def sim_timeseries():
+    limit = request.args.get('limit', 2000, type=int)
+    return jsonify({'timeseries': paper_trader.get_timeseries(limit=limit)})
+
+
+@api_bp.route('/sim/fills')
+def sim_fills():
+    limit = request.args.get('limit', 500, type=int)
+    return jsonify({'fills': paper_trader.get_fills(limit=limit)})
+
+
+@api_bp.route('/sim/export')
+def sim_export():
+    ts_limit = request.args.get('timeseries_limit', 20000, type=int)
+    fills_limit = request.args.get('fills_limit', 5000, type=int)
+    return jsonify({
+        'status': paper_trader.get_status(),
+        'timeseries': paper_trader.get_timeseries(limit=ts_limit),
+        'fills': paper_trader.get_fills(limit=fills_limit),
+    })
 
 
 # =============================================================================

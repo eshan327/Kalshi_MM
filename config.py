@@ -106,7 +106,7 @@ class RiskConfig:
 class StrategyConfig:
     """Market making strategy configuration."""
     # Target series (comma-separated for multiple, e.g., "KXHIGHNY,INBA-WINNER")
-    target_series: list = field(default_factory=lambda: [s.strip() for s in _get_env("TARGET_SERIES", "KXHIGHNY").split(",") if s.strip()])
+    target_series: list = field(default_factory=lambda: [s.strip() for s in _get_env("TARGET_SERIES", "KXHIGHDEN").split(",") if s.strip()])
     
     # Spread configuration
     min_spread: int = field(default_factory=lambda: _get_env_int("MIN_SPREAD", 5))
